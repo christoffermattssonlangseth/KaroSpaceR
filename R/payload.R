@@ -4,6 +4,7 @@ build_viewer_payload <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  top_genes_n = NULL,
   assay = NULL,
   metadata_input = NULL,
   metadata_input_columns = NULL,
@@ -32,6 +33,7 @@ build_viewer_payload <- function(
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    top_genes_n = top_genes_n,
     assay = assay,
     neighbor_mode = neighbor_mode,
     neighbor_graph = neighbor_graph,
@@ -562,19 +564,6 @@ rank_marker_genes_between_groups <- function(expression, gene_names, pos_idx, ne
     genes = as.character(gene_names[top_idx]),
     effect = as.numeric(effect[top_idx])
   )
-}
-
-matrix_rowmeans <- function(x) {
-  if (is.null(x) || ncol(x) == 0L) {
-    return(rep.int(0, nrow(x %||% matrix(numeric(), nrow = 0L))))
-  }
-  if (methods::is(x, "Matrix")) {
-    if (!requireNamespace("Matrix", quietly = TRUE)) {
-      stop("Sparse marker computation requires the Matrix package.")
-    }
-    return(as.numeric(Matrix::rowMeans(x)))
-  }
-  as.numeric(rowMeans(x))
 }
 
 matrix_detection_rate <- function(x) {

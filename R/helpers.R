@@ -126,3 +126,20 @@ coalesce_character <- function(x, y = character()) {
   out <- x %||% y
   as.character(out)
 }
+
+matrix_rowmeans <- function(x) {
+  x <- as_plain_matrix(x)
+  if (is.null(x)) {
+    return(numeric())
+  }
+  if (ncol(x) == 0L) {
+    return(rep.int(0, nrow(x)))
+  }
+  if (methods::is(x, "Matrix")) {
+    if (!requireNamespace("Matrix", quietly = TRUE)) {
+      stop("Sparse matrix operations require the Matrix package.")
+    }
+    return(as.numeric(Matrix::rowMeans(x)))
+  }
+  as.numeric(rowMeans(x))
+}

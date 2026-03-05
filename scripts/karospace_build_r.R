@@ -125,6 +125,14 @@ prepared_input <- prepare_karospace_input(
   metadata_input_columns = split_csv(options[["metadata-input-columns"]]),
   metadata_prefix = options[["metadata-prefix"]]
 )
+top_genes_n <- suppressWarnings(as.integer(options[["top-genes"]]))
+if (!is.null(options[["top-genes"]]) && (is.na(top_genes_n) || top_genes_n < 1L)) {
+  stop("--top-genes must be a positive integer.")
+}
+if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && !is.null(top_genes_n)) {
+  warning("--top-genes is ignored because --genes was provided explicitly.", call. = FALSE)
+  top_genes_n <- NULL
+}
 report_metadata_merge(prepared_input)
 warn_low_coverage_selected_colors(
   obj = prepared_input,
@@ -138,6 +146,7 @@ export_karospace_viewer(
   initial_color = options[["initial-color"]],
   additional_colors = split_csv(options[["additional-colors"]]),
   genes = split_csv(options[["genes"]]),
+  top_genes_n = top_genes_n,
   assay = options[["assay"]],
   metadata_input = NULL,
   metadata_input_columns = NULL,

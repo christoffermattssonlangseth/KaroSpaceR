@@ -276,6 +276,7 @@ normalize_input_source <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  top_genes_n = NULL,
   assay = NULL,
   neighbor_mode = "spatial",
   neighbor_graph = NULL,
@@ -290,6 +291,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      top_genes_n = top_genes_n,
       assay = assay,
       neighbor_mode = neighbor_mode,
       neighbor_graph = neighbor_graph,
@@ -306,6 +308,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      top_genes_n = top_genes_n,
       assay = assay,
       neighbor_mode = neighbor_mode,
       neighbor_graph = neighbor_graph,
@@ -322,6 +325,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      top_genes_n = top_genes_n,
       assay = assay,
       neighbor_mode = neighbor_mode,
       neighbor_graph = neighbor_graph,
@@ -338,6 +342,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      top_genes_n = top_genes_n,
       assay = assay,
       neighbor_mode = neighbor_mode,
       neighbor_graph = neighbor_graph,
@@ -360,6 +365,7 @@ normalize_seurat_object <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  top_genes_n = NULL,
   assay = NULL,
   neighbor_mode = "spatial",
   neighbor_graph = NULL,
@@ -426,6 +432,7 @@ normalize_seurat_object <- function(
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    top_genes_n = top_genes_n,
     assay = expression_info$assay_name,
     neighbor_mode = neighbor_mode,
     neighbor_graph = neighbor_graph,
@@ -682,6 +689,7 @@ normalize_single_cell_experiment <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  top_genes_n = NULL,
   assay = NULL,
   neighbor_mode = "spatial",
   neighbor_graph = NULL,
@@ -733,6 +741,7 @@ normalize_single_cell_experiment <- function(
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    top_genes_n = top_genes_n,
     assay = expression_info$assay_name,
     neighbor_mode = neighbor_mode,
     neighbor_graph = neighbor_graph,
@@ -748,6 +757,7 @@ normalize_spatial_experiment <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  top_genes_n = NULL,
   assay = NULL,
   neighbor_mode = "spatial",
   neighbor_graph = NULL,
@@ -793,6 +803,7 @@ normalize_spatial_experiment <- function(
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    top_genes_n = top_genes_n,
     assay = expression_info$assay_name,
     neighbor_mode = neighbor_mode,
     neighbor_graph = neighbor_graph,
@@ -808,6 +819,7 @@ normalize_list_source <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  top_genes_n = NULL,
   assay = NULL,
   neighbor_mode = "spatial",
   neighbor_graph = NULL,
@@ -883,7 +895,9 @@ normalize_list_source <- function(
     gene_names = expression_info$gene_names,
     selected_genes = resolve_selected_genes(
       genes = genes,
-      gene_names = expression_info$gene_names
+      gene_names = expression_info$gene_names,
+      expression = expression_info$expression,
+      top_genes_n = top_genes_n
     ),
     expression_assay = x$expression_assay %||% assay,
     groupby = groupby,
@@ -1481,21 +1495,62 @@ extract_assay_feature_names <- function(assay_obj) {
   character()
 }
 
-resolve_selected_genes <- function(genes, gene_names) {
+rank_top_expressed_gene_names <- function(expression, gene_names, top_genes_n = 20L) {
+  gene_names <- as.character(gene_names %||% character())
+  if (length(gene_names) == 0L || is.null(expression)) {
+    return(character())
+  }
+
+  top_genes_n <- suppressWarnings(as.integer(top_genes_n %||% 20L))
+  if (is.na(top_genes_n) || top_genes_n < 1L) {
+    return(character())
+  }
+
+  mean_expression <- matrix_rowmeans(expression)
+  if (length(mean_expression) != length(gene_names)) {
+    stop("Expression matrix rows do not align with gene names.")
+  }
+
+  valid <- is.finite(mean_expression) & !is.na(gene_names) & nzchar(gene_names)
+  if (!any(valid)) {
+    return(character())
+  }
+
+  valid_idx <- which(valid)
+  ord <- order(
+    -mean_expression[valid_idx],
+    gene_names[valid_idx]
+  )
+  gene_names[valid_idx][utils::head(ord, top_genes_n)]
+}
+
+resolve_selected_genes <- function(genes, gene_names, expression = NULL, top_genes_n = NULL) {
   gene_names <- as.character(gene_names %||% character())
   if (length(gene_names) == 0) {
     return(character())
   }
 
-  if (is.null(genes) || length(genes) == 0) {
-    return(gene_names[seq_len(min(20, length(gene_names)))])
+  if (!is.null(genes) && length(genes) > 0) {
+    selected <- intersect(as.character(genes), gene_names)
+    if (length(selected) == 0) {
+      stop("None of the requested genes were found in the expression matrix.")
+    }
+    return(selected)
   }
 
-  selected <- intersect(as.character(genes), gene_names)
-  if (length(selected) == 0) {
-    stop("None of the requested genes were found in the expression matrix.")
+  if (!is.null(top_genes_n) && length(top_genes_n) > 0) {
+    top_selected <- rank_top_expressed_gene_names(
+      expression = expression,
+      gene_names = gene_names,
+      top_genes_n = top_genes_n
+    )
+    if (length(top_selected) == 0L) {
+      stop("Could not resolve top expressed genes from the expression matrix.")
+    }
+    return(top_selected)
   }
-  selected
+
+  gene_names[seq_len(min(20, length(gene_names)))]
 }
 
 resolve_metadata_columns <- function(obs, groupby, metadata_columns = NULL) {

@@ -41,7 +41,7 @@ if (isTRUE(options$help) || is.null(options$input)) {
       "Rscript scripts/example_export.R --input path/to/object.rds [--output viewer.html]",
       "[--groupby sample_id] [--initial-color cell_type] [--additional-colors course,condition]",
       "[--metadata-input other_object.rds] [--metadata-input-columns col1,col2] [--metadata-prefix ext_]",
-      "[--assay SCT] [--genes GENE1,GENE2] [--neighbor-mode spatial] [--neighbor-graph SCT_snn] [--neighbor-k 6] [--inspect] [--inspect-genes]",
+      "[--assay SCT] [--genes GENE1,GENE2] [--top-genes 200] [--neighbor-mode spatial] [--neighbor-graph SCT_snn] [--neighbor-k 6] [--inspect] [--inspect-genes]",
       "[--marker-genes-groupby auto] [--marker-genes-top-n 20]",
       "[--interaction-markers-groupby cell_type] [--interaction-markers-top-targets 8] [--interaction-markers-top-genes 12]",
       "[--interaction-markers-min-cells 30] [--interaction-markers-min-neighbors 1]",
@@ -370,6 +370,14 @@ merge_report <- report_metadata_merge(obj, obs)
 groupby <- options$groupby %||% detect_groupby(obs)
 initial_color <- options[["initial-color"]] %||% detect_initial_color(obs, groupby)
 assay_name <- options[["assay"]] %||% detect_assay(obj)
+top_genes_n <- suppressWarnings(as.integer(options[["top-genes"]]))
+if (!is.null(options[["top-genes"]]) && (is.na(top_genes_n) || top_genes_n < 1L)) {
+  stop("--top-genes must be a positive integer.")
+}
+if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && !is.null(top_genes_n)) {
+  warning("--top-genes is ignored because --genes was provided explicitly.", call. = FALSE)
+  top_genes_n <- NULL
+}
 additional_colors <- split_csv(options[["additional-colors"]]) %||%
   detect_additional_colors(obs, groupby, initial_color)
 missing_additional_colors <- setdiff(additional_colors %||% character(), names(obs))
@@ -431,6 +439,7 @@ if (!is.null(metadata_input_path) && nzchar(metadata_input_path)) {
 cat("Detected groupby: ", groupby, "\n", sep = "")
 cat("Detected initial color: ", initial_color, "\n", sep = "")
 cat("Assay: ", assay_name %||% "<none>", "\n", sep = "")
+cat("Top genes: ", top_genes_n %||% "<default>", "\n", sep = "")
 cat("Neighbor mode: ", neighbor_mode, "\n", sep = "")
 cat("Neighbor graph: ", neighbor_graph %||% "<auto>", "\n", sep = "")
 cat("Neighbor k: ", neighbor_k, "\n", sep = "")
@@ -539,6 +548,7 @@ export_karospace_viewer(
   initial_color = initial_color,
   additional_colors = additional_colors,
   genes = split_csv(options$genes),
+  top_genes_n = top_genes_n,
   assay = assay_name,
   metadata_input = NULL,
   metadata_input_columns = NULL,

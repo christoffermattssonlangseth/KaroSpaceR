@@ -139,6 +139,14 @@ stopifnot(payload$interaction_markers$cell_type$A$B$n_non_contact >= 5L)
 
 gene_info <- resolve_input_gene_names(toy)
 stopifnot(identical(unlist(gene_info$gene_names[1:3], use.names = FALSE), c("Gene01", "Gene02", "Gene03")))
+top_gene_selection <- resolve_selected_genes(
+  genes = NULL,
+  gene_names = rownames(expr),
+  expression = expr,
+  top_genes_n = 3L
+)
+stopifnot(length(top_gene_selection) == 3L)
+stopifnot(setequal(top_gene_selection, c("Gene01", "Gene02", "Gene03")))
 
 fake_staffli <- structure(
   list(),

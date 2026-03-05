@@ -33,7 +33,7 @@ Rscript scripts/karospace_build_r.R \
   --initial-color cell_type \
   --additional-colors course \
   --assay SCT \
-  --genes CXCL8,COL1A1 \
+  --top-genes 200 \
   --marker-genes-groupby auto
 ```
 
@@ -91,6 +91,17 @@ Rscript scripts/example_export.R \
   --genes CXCL8,COL1A1 \
   --output viewer.html
 ```
+
+If you want the exporter to preload the highest-expressed genes from the chosen assay instead of naming genes manually:
+
+```bash
+Rscript scripts/example_export.R \
+  --input path/to/object.rds \
+  --assay SCT \
+  --top-genes 200
+```
+
+`--top-genes 200` selects the top 200 genes by mean expression across all exported cells/spots in the selected assay.
 
 To precompute contact-conditioned interaction markers for a categorical color:
 
