@@ -7,14 +7,14 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 ## Phase 1: Gene Expression Parity
 
 ### Tasks
-- [ ] Add a proper assay/layer resolver for each supported input type.
-- [ ] For Seurat, default to normalized expression in `SCT` when available.
-- [ ] Implement fallback order: `SCT` → `Spatial` → `counts`.
-- [ ] Populate `available_genes` in the payload.
-- [ ] Populate `genes_meta` in the payload.
-- [ ] Export per-section gene matrices.
-- [ ] Add CLI/example-script option `--assay`.
-- [ ] Add CLI/example-script option `--genes`.
+- [x] Add a proper assay/layer resolver for each supported input type.
+- [x] For Seurat, default to normalized expression in `SCT` when available.
+- [x] Implement practical assay fallback with slot/layer fallback for expression extraction.
+- [x] Populate `available_genes` in the payload.
+- [x] Populate `genes_meta` in the payload.
+- [x] Export per-section gene matrices.
+- [x] Add CLI/example-script option `--assay`.
+- [x] Add CLI/example-script option `--genes`.
 
 ### Acceptance Criteria
 - `Heart_A90_karospacer.html` can switch between cluster coloring and true gene-expression coloring.
@@ -24,20 +24,24 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 ## Phase 2: Better Metadata and Viewer Defaults
 
 ### Tasks
-- [ ] Improve auto-detection of `groupby`.
-- [ ] Improve auto-detection of `initial_color`.
-- [ ] Improve auto-detection of `additional_colors`.
-- [ ] Improve detection of section-level metadata.
-- [ ] Add optional `outline_by` support.
-- [ ] Add cleaner metadata filtering for single-section datasets.
-- [ ] Add cleaner metadata filtering for multi-section datasets.
-- [ ] Normalize Seurat inputs to the standard payload structure.
-- [ ] Normalize SingleCellExperiment inputs to the standard payload structure.
-- [ ] Normalize SpatialExperiment inputs to the standard payload structure.
-- [ ] Normalize plain-list inputs to the standard payload structure.
+- [x] Improve auto-detection of `groupby`.
+- [x] Improve auto-detection of `initial_color`.
+- [x] Improve auto-detection of `additional_colors`.
+- [x] Improve detection of section-level metadata.
+- [x] Add optional `outline_by` support.
+- [x] Add cleaner metadata filtering for single-section datasets.
+- [x] Add cleaner metadata filtering for multi-section datasets.
+- [x] Normalize Seurat inputs to the standard payload structure.
+- [x] Normalize SingleCellExperiment inputs to the standard payload structure.
+- [x] Normalize SpatialExperiment inputs to the standard payload structure.
+- [x] Normalize plain-list inputs to the standard payload structure.
 
 ### Acceptance Criteria
 - The same object exports with sensible defaults and minimal manual flags.
+
+### Remaining Polish
+- [ ] Tighten default color selection for partial external-metadata merges.
+- [ ] Add clearer export-time reporting of annotation coverage for partially annotated datasets.
 
 ---
 
@@ -89,8 +93,8 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 
 ## Status
 
-- Phase 1: ⬜ Not started  
-- Phase 2: ⬜ Not started  
+- Phase 1: ✅ Complete  
+- Phase 2: 🟨 Mostly complete; core tasks are done, remaining work is edge-case polish  
 - Phase 3: ⬜ Not started  
 - Phase 4: ⬜ Not started  
 - Phase 5: ⬜ Not started
