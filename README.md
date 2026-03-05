@@ -28,7 +28,9 @@ Rscript scripts/karospace_build_r.R \
   --output viewer.html \
   --groupby sample_id \
   --initial-color cell_type \
-  --additional-colors course
+  --additional-colors course \
+  --assay SCT \
+  --genes CXCL8,COL1A1
 ```
 
 ## Fastest Real-Dataset Test
@@ -53,6 +55,26 @@ If you only want to inspect what it would choose:
 Rscript scripts/example_export.R --input path/to/object.rds --inspect
 ```
 
+If you want to inspect available genes for the selected assay before exporting:
+
+```bash
+Rscript scripts/example_export.R \
+  --input path/to/object.rds \
+  --assay SCT \
+  --inspect-genes
+```
+
+To filter the gene list:
+
+```bash
+Rscript scripts/example_export.R \
+  --input path/to/object.rds \
+  --assay SCT \
+  --inspect-genes \
+  --gene-query COL \
+  --gene-limit 25
+```
+
 If auto-detection picks the wrong columns, override them explicitly:
 
 ```bash
@@ -61,6 +83,8 @@ Rscript scripts/example_export.R \
   --groupby sample_id \
   --initial-color cell_type \
   --additional-colors course,condition \
+  --assay SCT \
+  --genes CXCL8,COL1A1 \
   --output viewer.html
 ```
 

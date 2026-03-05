@@ -52,6 +52,37 @@ stopifnot(payload$total_cells == n_cells)
 stopifnot(identical(unlist(payload$available_colors, use.names = FALSE), c("cell_type", "course")))
 stopifnot(identical(unlist(payload$available_genes, use.names = FALSE), c("Gene01", "Gene02")))
 stopifnot(isTRUE(payload$has_umap))
+stopifnot(identical(names(payload$genes_meta), c("Gene01", "Gene02")))
+stopifnot(length(payload$sections[[1]]$genes$Gene01) == 20L)
+stopifnot(identical(payload$gene_encodings$Gene01, "dense"))
+
+gene_info <- resolve_input_gene_names(toy)
+stopifnot(identical(unlist(gene_info$gene_names[1:3], use.names = FALSE), c("Gene01", "Gene02", "Gene03")))
+
+fake_staffli <- structure(
+  list(),
+  meta_data = data.frame(
+    barcode = c("cell_b", "cell_a"),
+    pxl_col_in_fullres = c(11, 22),
+    pxl_row_in_fullres = c(33, 44),
+    sampleID = c("1", "1"),
+    stringsAsFactors = FALSE
+  ),
+  imgs = c(
+    "/tmp/demo_section_a/spatial/tissue_hires_image.png"
+  ),
+  image_info = data.frame(
+    sampleID = "1",
+    stringsAsFactors = FALSE
+  ),
+  class = structure("Staffli", package = "semla")
+)
+staffli_coords <- extract_staffli_coordinate_df(fake_staffli)
+stopifnot(identical(rownames(staffli_coords), c("cell_b", "cell_a")))
+stopifnot(identical(unname(as.numeric(staffli_coords["cell_a", ])), c(22, 44)))
+staffli_obs <- extract_staffli_obs_df(fake_staffli)
+stopifnot(identical(staffli_obs$sampleID, c("1", "1")))
+stopifnot(identical(staffli_obs$sample_name, c("demo_section_a", "demo_section_a")))
 
 output_path <- tempfile(fileext = ".html")
 render_viewer_html(

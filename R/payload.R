@@ -4,6 +4,7 @@ build_viewer_payload <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  assay = NULL,
   metadata_columns = NULL,
   outline_by = NULL
 ) {
@@ -13,6 +14,7 @@ build_viewer_payload <- function(
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    assay = assay,
     metadata_columns = metadata_columns,
     outline_by = outline_by
   )

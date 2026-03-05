@@ -40,7 +40,8 @@ if (isTRUE(options$help) || is.null(options$input)) {
       "Usage:",
       "Rscript scripts/example_export.R --input path/to/object.rds [--output viewer.html]",
       "[--groupby sample_id] [--initial-color cell_type] [--additional-colors course,condition]",
-      "[--title MyViewer] [--theme light] [--inspect]",
+      "[--assay SCT] [--genes GENE1,GENE2] [--inspect] [--inspect-genes]",
+      "[--gene-query COL] [--gene-limit 50] [--title MyViewer] [--theme light]",
       sep = "\n"
     ),
     "\n"
@@ -57,7 +58,7 @@ split_csv <- function(value) {
 
 extract_obs <- function(x) {
   if (inherits(x, "Seurat")) {
-    return(x@meta.data)
+    return(augment_seurat_obs(x))
   }
 
   if (inherits(x, "SpatialExperiment")) {
@@ -79,8 +80,27 @@ extract_obs <- function(x) {
   }
 
   stop(
-    "Could not inspect the input. Supported inputs are list with obs, SingleCellExperiment, and SpatialExperiment."
+    "Could not inspect the input. Supported inputs are list with obs, Seurat, SingleCellExperiment, and SpatialExperiment."
   )
+}
+
+extract_assay_names <- function(x) {
+  if (inherits(x, "Seurat")) {
+    return(names(x@assays))
+  }
+
+  if (inherits(x, "SpatialExperiment") || inherits(x, "SingleCellExperiment")) {
+    if (!requireNamespace("SummarizedExperiment", quietly = TRUE)) {
+      return(character())
+    }
+    return(SummarizedExperiment::assayNames(x))
+  }
+
+  if (is.list(x) && is.list(x$assays)) {
+    return(names(x$assays))
+  }
+
+  character()
 }
 
 is_color_candidate <- function(column) {
@@ -104,7 +124,7 @@ is_groupby_candidate <- function(column) {
 
 pick_preferred_column <- function(names_vec, preferred) {
   lower <- tolower(names_vec)
-  hits <- match(preferred, lower, nomatch = 0L)
+  hits <- match(tolower(preferred), lower, nomatch = 0L)
   hits <- hits[hits > 0L]
   if (length(hits) == 0L) {
     return(NULL)
@@ -114,7 +134,8 @@ pick_preferred_column <- function(names_vec, preferred) {
 
 detect_groupby <- function(obs) {
   preferred <- c(
-    "sample_id", "section_id", "section", "sample", "library_id", "orig.ident",
+    "sample_name", "sample_id", "sampleid", "section_id", "section", "sample",
+    "library_id", "orig.ident",
     "imageid", "fov", "field_of_view", "slice"
   )
   direct_preferred <- pick_preferred_column(names(obs), preferred)
@@ -152,6 +173,13 @@ detect_initial_color <- function(obs, groupby) {
     stop("Could not auto-detect an initial color column. Pass --initial-color explicitly.")
   }
 
+  candidates <- candidates[vapply(obs[candidates], function(column) {
+    length(unique_non_missing(column)) > 1L
+  }, logical(1))]
+  if (length(candidates) == 0L) {
+    return(groupby)
+  }
+
   categorical_candidates <- candidates[vapply(obs[candidates], function(column) {
     is.factor(column) || is.character(column) || is.logical(column)
   }, logical(1))]
@@ -161,6 +189,11 @@ detect_initial_color <- function(obs, groupby) {
     "predicted_cell_type", "predicted.celltype", "cluster", "clusters",
     "leiden", "seurat_clusters", "subclass", "class"
   )
+
+  if (length(categorical_candidates) == 0L &&
+      (is.factor(obs[[groupby]]) || is.character(obs[[groupby]]) || is.logical(obs[[groupby]]))) {
+    return(groupby)
+  }
 
   pick_preferred_column(categorical_candidates, preferred) %||%
     pick_preferred_column(candidates, preferred) %||%
@@ -173,12 +206,29 @@ detect_additional_colors <- function(obs, groupby, initial_color) {
     return(NULL)
   }
 
+  candidates <- candidates[vapply(obs[candidates], function(column) {
+    length(unique_non_missing(column)) > 1L
+  }, logical(1))]
+  if (length(candidates) == 0L) {
+    return(NULL)
+  }
+
   categorical <- candidates[vapply(obs[candidates], function(column) {
     is.factor(column) || is.character(column) || is.logical(column)
   }, logical(1))]
   numeric <- setdiff(candidates, categorical)
 
   utils::head(c(categorical, numeric), 3L)
+}
+
+detect_assay <- function(x) {
+  assay_names <- extract_assay_names(x)
+  if (length(assay_names) == 0L) {
+    return(NULL)
+  }
+
+  preferred <- c("SCT", "logcounts", "Spatial", "RNA", "integrated", "counts")
+  pick_preferred_column(assay_names, preferred) %||% assay_names[[1L]]
 }
 
 default_output_path <- function(input_path) {
@@ -188,12 +238,35 @@ default_output_path <- function(input_path) {
   file.path(outdir, paste0(stem, "_karospace_buildr.html"))
 }
 
+filter_gene_names <- function(gene_names, query = NULL) {
+  gene_names <- as.character(gene_names %||% character())
+  if (is.null(query) || !nzchar(query)) {
+    return(gene_names)
+  }
+
+  keep <- grepl(query, gene_names, ignore.case = TRUE, fixed = TRUE)
+  gene_names[keep]
+}
+
+format_gene_preview <- function(gene_names, limit = 50L) {
+  gene_names <- as.character(gene_names %||% character())
+  if (length(gene_names) == 0L) {
+    return("<none>")
+  }
+
+  limit <- max(1L, as.integer(limit))
+  preview <- utils::head(gene_names, limit)
+  paste(preview, collapse = ", ")
+}
+
 input_path <- normalizePath(options$input, mustWork = TRUE)
 obj <- read_karospace_source(input_path)
 obs <- extract_obs(obj)
+available_assays <- extract_assay_names(obj)
 
 groupby <- options$groupby %||% detect_groupby(obs)
 initial_color <- options[["initial-color"]] %||% detect_initial_color(obs, groupby)
+assay_name <- options[["assay"]] %||% detect_assay(obj)
 additional_colors <- split_csv(options[["additional-colors"]]) %||%
   detect_additional_colors(obs, groupby, initial_color)
 missing_additional_colors <- setdiff(additional_colors %||% character(), names(obs))
@@ -212,6 +285,7 @@ theme <- options$theme %||% "light"
 cat("Input: ", input_path, "\n", sep = "")
 cat("Detected groupby: ", groupby, "\n", sep = "")
 cat("Detected initial color: ", initial_color, "\n", sep = "")
+cat("Assay: ", assay_name %||% "<none>", "\n", sep = "")
 cat(
   "Additional colors: ",
   if (length(additional_colors %||% character()) > 0L) paste(additional_colors, collapse = ", ") else "<none>",
@@ -237,8 +311,38 @@ cat(
   "\n",
   sep = ""
 )
+cat(
+  "Available assays: ",
+  if (length(available_assays) > 0L) paste(available_assays, collapse = ", ") else "<none>",
+  "\n",
+  sep = ""
+)
 
-if (isTRUE(options$inspect)) {
+if (isTRUE(options$inspect) || isTRUE(options[["inspect-genes"]])) {
+  gene_limit <- suppressWarnings(as.integer(options[["gene-limit"]] %||% 50L))
+  if (is.na(gene_limit) || gene_limit < 1L) {
+    gene_limit <- 50L
+  }
+
+  gene_info <- resolve_input_gene_names(
+    x = obj,
+    requested_assay = assay_name
+  )
+  filtered_genes <- filter_gene_names(
+    gene_names = gene_info$gene_names,
+    query = options[["gene-query"]]
+  )
+
+  cat("Gene assay: ", gene_info$assay_name %||% "<none>", "\n", sep = "")
+  cat("Gene count: ", length(gene_info$gene_names), "\n", sep = "")
+  if (!is.null(options[["gene-query"]]) && nzchar(options[["gene-query"]])) {
+    cat("Gene query: ", options[["gene-query"]], "\n", sep = "")
+    cat("Matched genes: ", length(filtered_genes), "\n", sep = "")
+  }
+  cat("Gene preview: ", format_gene_preview(filtered_genes, gene_limit), "\n", sep = "")
+}
+
+if (isTRUE(options$inspect) || isTRUE(options[["inspect-genes"]])) {
   quit(save = "no", status = 0L)
 }
 
@@ -249,6 +353,7 @@ export_karospace_viewer(
   initial_color = initial_color,
   additional_colors = additional_colors,
   genes = split_csv(options$genes),
+  assay = assay_name,
   metadata_columns = split_csv(options[["metadata-columns"]]),
   outline_by = options[["outline-by"]],
   title = title,

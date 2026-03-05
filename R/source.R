@@ -41,6 +41,7 @@ normalize_input_source <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  assay = NULL,
   metadata_columns = NULL,
   outline_by = NULL
 ) {
@@ -51,6 +52,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      assay = assay,
       metadata_columns = metadata_columns,
       outline_by = outline_by
     ))
@@ -63,6 +65,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      assay = assay,
       metadata_columns = metadata_columns,
       outline_by = outline_by
     ))
@@ -75,6 +78,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      assay = assay,
       metadata_columns = metadata_columns,
       outline_by = outline_by
     ))
@@ -87,6 +91,7 @@ normalize_input_source <- function(
       initial_color = initial_color,
       additional_colors = additional_colors,
       genes = genes,
+      assay = assay,
       metadata_columns = metadata_columns,
       outline_by = outline_by
     ))
@@ -105,10 +110,11 @@ normalize_seurat_object <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  assay = NULL,
   metadata_columns = NULL,
   outline_by = NULL
 ) {
-  obs <- x@meta.data
+  obs <- augment_seurat_obs(x)
   if (!is.data.frame(obs)) {
     stop("Seurat object does not have a usable meta.data frame.")
   }
@@ -118,13 +124,142 @@ normalize_seurat_object <- function(
     stop("Seurat meta.data must have row names matching cell names.")
   }
 
+  coord_df <- resolve_seurat_coordinate_df(
+    x = x,
+    cell_names = cell_names
+  )
+
+  coords <- as.matrix(coord_df[, c("x", "y"), drop = FALSE])
+  mode(coords) <- "numeric"
+
+  umap <- NULL
+  if ("umap" %in% names(x@reductions)) {
+    embeddings <- x@reductions$umap@cell.embeddings
+    embeddings <- embeddings[cell_names, , drop = FALSE]
+    if (ncol(embeddings) >= 2) {
+      umap <- as.matrix(embeddings[, seq_len(2), drop = FALSE])
+      mode(umap) <- "numeric"
+    }
+  }
+
+  expression_info <- resolve_seurat_expression(
+    x = x,
+    requested_assay = assay
+  )
+
+  normalize_list_source(
+    x = list(
+      obs = obs,
+      coordinates = coords,
+      umap = umap,
+      expression = expression_info$expression,
+      gene_names = expression_info$gene_names,
+      expression_assay = expression_info$assay_name
+    ),
+    groupby = groupby,
+    initial_color = initial_color,
+    additional_colors = additional_colors,
+    genes = genes,
+    assay = expression_info$assay_name,
+    metadata_columns = metadata_columns,
+    outline_by = outline_by
+  )
+}
+
+augment_seurat_obs <- function(x) {
+  obs <- x@meta.data
+  if (!is.data.frame(obs)) {
+    return(obs)
+  }
+
+  staffli_obj <- NULL
+  if (length(x@tools) > 0 && "Staffli" %in% names(x@tools)) {
+    staffli_obj <- x@tools[["Staffli"]]
+  }
+  staffli_obs <- extract_staffli_obs_df(staffli_obj)
+  if (is.null(staffli_obs) || nrow(staffli_obs) == 0) {
+    return(obs)
+  }
+
+  cell_names <- rownames(obs)
+  if (is.null(cell_names) || length(cell_names) == 0) {
+    return(obs)
+  }
+
+  keep <- intersect(cell_names, rownames(staffli_obs))
+  if (length(keep) == 0) {
+    return(obs)
+  }
+
+  aligned <- staffli_obs[cell_names, , drop = FALSE]
+  merged <- obs
+  for (column_name in colnames(aligned)) {
+    if (!(column_name %in% names(merged))) {
+      merged[[column_name]] <- aligned[[column_name]]
+      next
+    }
+
+    current <- merged[[column_name]]
+    fill <- is.na(current) | (!nzchar(as.character(current)))
+    if (any(fill)) {
+      current[fill] <- aligned[[column_name]][fill]
+      merged[[column_name]] <- current
+    }
+  }
+
+  merged
+}
+
+resolve_seurat_coordinate_df <- function(x, cell_names) {
+  image_coords <- extract_seurat_image_coordinate_df(x)
+  staffli_obj <- NULL
+  if (length(x@tools) > 0 && "Staffli" %in% names(x@tools)) {
+    staffli_obj <- x@tools[["Staffli"]]
+  }
+  staffli_coords <- extract_staffli_coordinate_df(staffli_obj)
+
+  coord_df <- image_coords
+  if (!is.null(staffli_coords)) {
+    if (is.null(coord_df)) {
+      coord_df <- staffli_coords
+    } else {
+      missing_from_images <- setdiff(rownames(staffli_coords), rownames(coord_df))
+      if (length(missing_from_images) > 0) {
+        coord_df <- rbind(coord_df, staffli_coords[missing_from_images, , drop = FALSE])
+      }
+    }
+  }
+
+  if (is.null(coord_df) || nrow(coord_df) == 0) {
+    stop(
+      "Seurat object has no spatial coordinates in @images or tools$Staffli."
+    )
+  }
+
+  missing_cells <- setdiff(cell_names, rownames(coord_df))
+  if (length(missing_cells) > 0) {
+    checked_sources <- c(
+      if (length(x@images) > 0) "@images" else NULL,
+      if (!is.null(staffli_coords)) "tools$Staffli" else NULL
+    )
+    stop(
+      "Seurat spatial coordinates do not cover all cells in meta.data. Missing ",
+      length(missing_cells),
+      " cells after checking ",
+      paste(checked_sources, collapse = " and "),
+      "."
+    )
+  }
+
+  coord_df[cell_names, , drop = FALSE]
+}
+
+extract_seurat_image_coordinate_df <- function(x) {
   if (length(x@images) == 0) {
-    stop("Seurat object has no spatial image data in @images.")
+    return(NULL)
   }
 
   coord_frames <- list()
-  x_col <- NULL
-  y_col <- NULL
   for (image_name in names(x@images)) {
     image_obj <- x@images[[image_name]]
     if (!("coordinates" %in% slotNames(image_obj))) {
@@ -147,63 +282,128 @@ normalize_seurat_object <- function(
       image_y_col <- image_y_col %||% numeric_cols[[2]]
     }
 
-    x_col <- x_col %||% image_x_col
-    y_col <- y_col %||% image_y_col
-    coord_frames[[image_name]] <- image_coords
+    coord_frames[[image_name]] <- data.frame(
+      x = as.numeric(image_coords[[image_x_col]]),
+      y = as.numeric(image_coords[[image_y_col]]),
+      row.names = rownames(image_coords),
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
   }
 
   if (length(coord_frames) == 0) {
-    stop("Could not resolve coordinates from any Seurat image slot.")
+    return(NULL)
   }
 
   coord_df <- do.call(rbind, unname(coord_frames))
-  coord_df <- coord_df[!duplicated(rownames(coord_df)), , drop = FALSE]
-  missing_cells <- setdiff(cell_names, rownames(coord_df))
-  if (length(missing_cells) > 0) {
-    stop(
-      "Seurat image coordinates do not cover all cells in meta.data. Missing ",
-      length(missing_cells),
-      " cells."
-    )
-  }
-  coord_df <- coord_df[cell_names, , drop = FALSE]
+  coord_df[!duplicated(rownames(coord_df)), , drop = FALSE]
+}
 
-  coords <- as.matrix(coord_df[, c(x_col, y_col), drop = FALSE])
-  mode(coords) <- "numeric"
-
-  umap <- NULL
-  if ("umap" %in% names(x@reductions)) {
-    embeddings <- x@reductions$umap@cell.embeddings
-    embeddings <- embeddings[cell_names, , drop = FALSE]
-    if (ncol(embeddings) >= 2) {
-      umap <- as.matrix(embeddings[, seq_len(2), drop = FALSE])
-      mode(umap) <- "numeric"
-    }
+extract_staffli_coordinate_df <- function(staffli) {
+  if (is.null(staffli)) {
+    return(NULL)
   }
 
-  assay_name <- if ("Spatial" %in% names(x@assays)) "Spatial" else x@active.assay
-  assay_obj <- x@assays[[assay_name]]
-  expression <- NULL
-  if ("data" %in% slotNames(assay_obj) && nrow(assay_obj@data) > 0) {
-    expression <- assay_obj@data
-  } else if ("counts" %in% slotNames(assay_obj) && nrow(assay_obj@counts) > 0) {
-    expression <- assay_obj@counts
+  staffli_attrs <- attributes(staffli)
+  meta_data <- staffli_attrs$meta_data %||% NULL
+  if (!is.data.frame(meta_data) || nrow(meta_data) == 0) {
+    return(NULL)
   }
 
-  normalize_list_source(
-    x = list(
-      obs = obs,
-      coordinates = coords,
-      umap = umap,
-      expression = expression,
-      gene_names = if (!is.null(expression)) rownames(expression) else character()
-    ),
-    groupby = groupby,
-    initial_color = initial_color,
-    additional_colors = additional_colors,
-    genes = genes,
-    metadata_columns = metadata_columns,
-    outline_by = outline_by
+  barcode_col <- pick_first_existing(
+    colnames(meta_data),
+    c("barcode", "cell", "cell_id", "spot", "spot_id")
+  )
+  x_col <- pick_first_existing(
+    colnames(meta_data),
+    c("pxl_col_in_fullres", "imagecol", "col", "x")
+  )
+  y_col <- pick_first_existing(
+    colnames(meta_data),
+    c("pxl_row_in_fullres", "imagerow", "row", "y")
+  )
+
+  if (is.null(barcode_col) || is.null(x_col) || is.null(y_col)) {
+    return(NULL)
+  }
+
+  coord_df <- data.frame(
+    barcode = as.character(meta_data[[barcode_col]]),
+    x = as.numeric(meta_data[[x_col]]),
+    y = as.numeric(meta_data[[y_col]]),
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+  coord_df <- coord_df[!is.na(coord_df$barcode) & nzchar(coord_df$barcode), , drop = FALSE]
+  coord_df <- coord_df[!duplicated(coord_df$barcode), , drop = FALSE]
+  rownames(coord_df) <- coord_df$barcode
+  coord_df$barcode <- NULL
+  coord_df
+}
+
+extract_staffli_obs_df <- function(staffli) {
+  if (is.null(staffli)) {
+    return(NULL)
+  }
+
+  staffli_attrs <- attributes(staffli)
+  meta_data <- staffli_attrs$meta_data %||% NULL
+  if (!is.data.frame(meta_data) || nrow(meta_data) == 0) {
+    return(NULL)
+  }
+
+  barcode_col <- pick_first_existing(
+    colnames(meta_data),
+    c("barcode", "cell", "cell_id", "spot", "spot_id")
+  )
+  if (is.null(barcode_col)) {
+    return(NULL)
+  }
+
+  out <- data.frame(
+    row.names = as.character(meta_data[[barcode_col]]),
+    stringsAsFactors = FALSE
+  )
+
+  sample_id_col <- pick_first_existing(colnames(meta_data), c("sampleID", "sample_id", "sample"))
+  if (!is.null(sample_id_col)) {
+    out$sampleID <- as.character(meta_data[[sample_id_col]])
+  }
+
+  sample_map <- extract_staffli_sample_map(staffli_attrs)
+  if (!is.null(sample_map) && "sampleID" %in% names(out)) {
+    matched <- match(out$sampleID, sample_map$sampleID)
+    out$sample_name <- sample_map$sample_name[matched]
+  }
+
+  out
+}
+
+extract_staffli_sample_map <- function(staffli_attrs) {
+  imgs <- as.character(staffli_attrs$imgs %||% character())
+  if (length(imgs) == 0) {
+    return(NULL)
+  }
+
+  sample_ids <- NULL
+  image_info <- staffli_attrs$image_info %||% NULL
+  if (is.data.frame(image_info) && "sampleID" %in% colnames(image_info)) {
+    sample_ids <- as.character(image_info$sampleID)
+  }
+  if (is.null(sample_ids) || length(sample_ids) != length(imgs)) {
+    sample_ids <- as.character(seq_along(imgs))
+  }
+
+  sample_names <- vapply(
+    imgs,
+    function(path) basename(dirname(dirname(path))),
+    character(1)
+  )
+
+  data.frame(
+    sampleID = sample_ids,
+    sample_name = sample_names,
+    stringsAsFactors = FALSE
   )
 }
 
@@ -213,6 +413,7 @@ normalize_single_cell_experiment <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  assay = NULL,
   metadata_columns = NULL,
   outline_by = NULL
 ) {
@@ -242,22 +443,25 @@ normalize_single_cell_experiment <- function(
     umap <- SingleCellExperiment::reducedDim(x, "X_umap")
   }
 
-  assay_names <- SummarizedExperiment::assayNames(x)
-  assay_name <- if ("logcounts" %in% assay_names) "logcounts" else assay_names[[1]]
-  expression <- SummarizedExperiment::assay(x, assay_name)
+  expression_info <- resolve_summarized_experiment_expression(
+    x = x,
+    requested_assay = assay
+  )
 
   normalize_list_source(
     x = list(
       obs = obs,
       coordinates = spatial,
       umap = umap,
-      expression = expression,
-      gene_names = rownames(x)
+      expression = expression_info$expression,
+      gene_names = expression_info$gene_names,
+      expression_assay = expression_info$assay_name
     ),
     groupby = groupby,
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    assay = expression_info$assay_name,
     metadata_columns = metadata_columns,
     outline_by = outline_by
   )
@@ -269,6 +473,7 @@ normalize_spatial_experiment <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  assay = NULL,
   metadata_columns = NULL,
   outline_by = NULL
 ) {
@@ -292,22 +497,25 @@ normalize_spatial_experiment <- function(
     }
   }
 
-  assay_names <- SummarizedExperiment::assayNames(x)
-  assay_name <- if ("logcounts" %in% assay_names) "logcounts" else assay_names[[1]]
-  expression <- SummarizedExperiment::assay(x, assay_name)
+  expression_info <- resolve_summarized_experiment_expression(
+    x = x,
+    requested_assay = assay
+  )
 
   normalize_list_source(
     x = list(
       obs = obs,
       coordinates = spatial,
       umap = umap,
-      expression = expression,
-      gene_names = rownames(x)
+      expression = expression_info$expression,
+      gene_names = expression_info$gene_names,
+      expression_assay = expression_info$assay_name
     ),
     groupby = groupby,
     initial_color = initial_color,
     additional_colors = additional_colors,
     genes = genes,
+    assay = expression_info$assay_name,
     metadata_columns = metadata_columns,
     outline_by = outline_by
   )
@@ -319,6 +527,7 @@ normalize_list_source <- function(
   initial_color,
   additional_colors = NULL,
   genes = NULL,
+  assay = NULL,
   metadata_columns = NULL,
   outline_by = NULL
 ) {
@@ -368,7 +577,8 @@ normalize_list_source <- function(
   expression_info <- normalize_expression(
     expression = x$expression %||% x$expr,
     gene_names = x$gene_names %||% x$genes_available %||% rownames(x$expression %||% x$expr),
-    n_cells = nrow(obs)
+    n_cells = nrow(obs),
+    cell_names = rownames(obs)
   )
 
   list(
@@ -381,6 +591,7 @@ normalize_list_source <- function(
       genes = genes,
       gene_names = expression_info$gene_names
     ),
+    expression_assay = x$expression_assay %||% assay,
     groupby = groupby,
     initial_color = initial_color,
     additional_colors = unique(c(initial_color, additional_colors)),
@@ -393,7 +604,7 @@ normalize_list_source <- function(
   )
 }
 
-normalize_expression <- function(expression, gene_names = NULL, n_cells) {
+normalize_expression <- function(expression, gene_names = NULL, n_cells, cell_names = NULL) {
   if (is.null(expression)) {
     return(list(expression = NULL, gene_names = character()))
   }
@@ -405,6 +616,9 @@ normalize_expression <- function(expression, gene_names = NULL, n_cells) {
   }
 
   if (dims[[2]] == n_cells) {
+    if (!is.null(cell_names) && !is.null(colnames(expr)) && all(cell_names %in% colnames(expr))) {
+      expr <- expr[, cell_names, drop = FALSE]
+    }
     inferred_genes <- coalesce_character(gene_names, rownames(expr))
     if (length(inferred_genes) == 0) {
       inferred_genes <- sprintf("Gene%05d", seq_len(dims[[1]]))
@@ -416,6 +630,9 @@ normalize_expression <- function(expression, gene_names = NULL, n_cells) {
   }
 
   if (dims[[1]] == n_cells) {
+    if (!is.null(cell_names) && !is.null(rownames(expr)) && all(cell_names %in% rownames(expr))) {
+      expr <- expr[cell_names, , drop = FALSE]
+    }
     inferred_genes <- coalesce_character(gene_names, colnames(expr))
     if (length(inferred_genes) == 0) {
       inferred_genes <- sprintf("Gene%05d", seq_len(dims[[2]]))
@@ -427,6 +644,190 @@ normalize_expression <- function(expression, gene_names = NULL, n_cells) {
   }
 
   stop("expression dimensions must align with the number of cells.")
+}
+
+resolve_seurat_expression <- function(x, requested_assay = NULL) {
+  assay_name <- resolve_seurat_assay_name(
+    x = x,
+    requested_assay = requested_assay
+  )
+  assay_obj <- x@assays[[assay_name]]
+  expression_info <- extract_expression_from_assay_object(assay_obj)
+  if (is.null(expression_info$expression)) {
+    stop(
+      "Could not resolve expression data from Seurat assay '",
+      assay_name,
+      "'."
+    )
+  }
+  expression_info$assay_name <- assay_name
+  expression_info
+}
+
+resolve_input_gene_names <- function(x, requested_assay = NULL) {
+  if (inherits(x, "Seurat")) {
+    assay_name <- resolve_seurat_assay_name(x = x, requested_assay = requested_assay)
+    assay_obj <- x@assays[[assay_name]]
+    gene_names <- extract_assay_feature_names(assay_obj)
+    return(list(
+      assay_name = assay_name,
+      gene_names = unique(as.character(gene_names))
+    ))
+  }
+
+  if (inherits(x, "SpatialExperiment") || inherits(x, "SingleCellExperiment")) {
+    expression_info <- resolve_summarized_experiment_expression(
+      x = x,
+      requested_assay = requested_assay
+    )
+    return(list(
+      assay_name = expression_info$assay_name,
+      gene_names = unique(as.character(expression_info$gene_names))
+    ))
+  }
+
+  if (is.list(x)) {
+    expression <- x$expression %||% x$expr
+    expression_info <- if (is.null(expression)) {
+      list(expression = NULL, gene_names = character())
+    } else {
+      normalize_expression(
+        expression = expression,
+        gene_names = x$gene_names %||% x$genes_available %||% rownames(expression),
+        n_cells = nrow(x$obs %||% data.frame())
+      )
+    }
+    return(list(
+      assay_name = requested_assay,
+      gene_names = unique(as.character(expression_info$gene_names))
+    ))
+  }
+
+  stop(
+    "Could not resolve gene names for input class: ",
+    paste(class(x), collapse = ", ")
+  )
+}
+
+resolve_seurat_assay_name <- function(x, requested_assay = NULL) {
+  assay_names <- names(x@assays)
+  if (length(assay_names) == 0) {
+    return(NULL)
+  }
+
+  if (!is.null(requested_assay) && nzchar(requested_assay)) {
+    if (!(requested_assay %in% assay_names)) {
+      stop(
+        "Requested assay not found in Seurat object: ",
+        requested_assay,
+        ". Available assays: ",
+        paste(assay_names, collapse = ", ")
+      )
+    }
+    return(requested_assay)
+  }
+
+  preferred <- unique(c(
+    "SCT",
+    "Spatial",
+    x@active.assay,
+    "RNA",
+    "integrated"
+  ))
+  chosen <- pick_first_existing(assay_names, preferred)
+  chosen %||% assay_names[[1]]
+}
+
+resolve_summarized_experiment_expression <- function(x, requested_assay = NULL) {
+  assay_names <- SummarizedExperiment::assayNames(x)
+  if (length(assay_names) == 0) {
+    return(list(
+      expression = NULL,
+      gene_names = character(),
+      assay_name = NULL
+    ))
+  }
+
+  assay_name <- requested_assay
+  if (is.null(assay_name) || !nzchar(assay_name)) {
+    assay_name <- pick_first_existing(
+      assay_names,
+      c("logcounts", "data", "normalized", "counts")
+    ) %||% assay_names[[1]]
+  }
+
+  if (!(assay_name %in% assay_names)) {
+    stop(
+      "Requested assay not found: ",
+      assay_name,
+      ". Available assays: ",
+      paste(assay_names, collapse = ", ")
+    )
+  }
+
+  expression <- SummarizedExperiment::assay(x, assay_name)
+  list(
+    expression = expression,
+    gene_names = coalesce_character(rownames(x), rownames(expression)),
+    assay_name = assay_name
+  )
+}
+
+extract_expression_from_assay_object <- function(assay_obj) {
+  feature_names <- extract_assay_feature_names(assay_obj)
+
+  if ("layers" %in% slotNames(assay_obj)) {
+    layer_names <- names(assay_obj@layers)
+    layer_name <- pick_first_existing(layer_names, c("data", "counts")) %||%
+      if (length(layer_names) > 0) layer_names[[1]] else NULL
+    if (!is.null(layer_name)) {
+      expression <- assay_obj@layers[[layer_name]]
+      dims <- dim(expression)
+      if (!is.null(dims) && length(dims) == 2 && all(dims > 0)) {
+        return(list(
+          expression = expression,
+          gene_names = coalesce_character(rownames(expression), feature_names),
+          source = paste0("layer:", layer_name)
+        ))
+      }
+    }
+  }
+
+  for (slot_name in c("data", "counts")) {
+    if (!(slot_name %in% slotNames(assay_obj))) {
+      next
+    }
+    expression <- slot(assay_obj, slot_name)
+    dims <- dim(expression)
+    if (!is.null(dims) && length(dims) == 2 && all(dims > 0)) {
+      return(list(
+        expression = expression,
+        gene_names = coalesce_character(rownames(expression), feature_names),
+        source = paste0("slot:", slot_name)
+      ))
+    }
+  }
+
+  list(
+    expression = NULL,
+    gene_names = character(),
+    source = NULL
+  )
+}
+
+extract_assay_feature_names <- function(assay_obj) {
+  if ("features" %in% slotNames(assay_obj)) {
+    feature_names <- rownames(assay_obj@features)
+    if (length(feature_names) > 0) {
+      return(as.character(feature_names))
+    }
+  }
+
+  if (!is.null(rownames(assay_obj)) && length(rownames(assay_obj)) > 0) {
+    return(as.character(rownames(assay_obj)))
+  }
+
+  character()
 }
 
 resolve_selected_genes <- function(genes, gene_names) {

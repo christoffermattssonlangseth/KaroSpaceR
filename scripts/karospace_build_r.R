@@ -49,6 +49,7 @@ export_karospace_viewer(
   initial_color = options[["initial-color"]],
   additional_colors = split_csv(options[["additional-colors"]]),
   genes = split_csv(options[["genes"]]),
+  assay = options[["assay"]],
   metadata_columns = split_csv(options[["metadata-columns"]]),
   outline_by = options[["outline-by"]],
   title = options[["title"]] %||% "KaroSpace",
