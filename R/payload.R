@@ -156,9 +156,13 @@ build_color_column <- function(column) {
     return(list(values = values, meta = meta))
   }
 
+  missing_label <- "(missing)"
   factor_column <- if (is.factor(column)) column else factor(as.character(column))
+  if (any(is.na(factor_column))) {
+    factor_column <- addNA(factor_column, ifany = TRUE)
+    levels(factor_column)[is.na(levels(factor_column))] <- missing_label
+  }
   values <- as.numeric(factor_column) - 1
-  values[is.na(values)] <- NA_real_
   meta <- list(
     is_continuous = FALSE,
     categories = as_json_array(as.character(levels(factor_column))),

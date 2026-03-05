@@ -236,7 +236,7 @@ default_output_path <- function(input_path) {
   input_abs <- normalizePath(input_path, mustWork = TRUE)
   outdir <- dirname(input_abs)
   stem <- tools::file_path_sans_ext(basename(input_abs))
-  file.path(outdir, paste0(stem, "_karospace_buildr.html"))
+  file.path(outdir, paste0(stem, "_karospacer.html"))
 }
 
 filter_gene_names <- function(gene_names, query = NULL) {

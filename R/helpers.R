@@ -43,7 +43,7 @@ escape_html <- function(x) {
 }
 
 find_package_root <- function() {
-  installed <- system.file(package = "KaroSpaceBuildR")
+  installed <- system.file(package = "KaroSpaceR")
   if (nzchar(installed)) {
     return(installed)
   }
@@ -54,7 +54,7 @@ find_package_root <- function() {
   }
 
   stop(
-    "Could not resolve the package root. Install KaroSpaceBuildR or run from the repo root."
+    "Could not resolve the package root. Install KaroSpaceR or run from the repo root."
   )
 }
 
@@ -63,7 +63,7 @@ resolve_asset_path <- function(rel_path, explicit_path = NULL) {
     return(normalizePath(explicit_path, mustWork = TRUE))
   }
 
-  installed <- system.file(rel_path, package = "KaroSpaceBuildR")
+  installed <- system.file(rel_path, package = "KaroSpaceR")
   if (nzchar(installed)) {
     return(installed)
   }

@@ -1,6 +1,6 @@
-# KaroSpaceBuildR
+# KaroSpaceR
 
-`KaroSpaceBuildR` is a separate, repo-local implementation for exporting KaroSpace-like viewers from `.rds` inputs without modifying the `KaroSpace` repository.
+`KaroSpaceR` is a separate, repo-local implementation for exporting KaroSpace-like viewers from `.rds` inputs without modifying the `KaroSpace` repository.
 
 Current scope:
 
@@ -47,7 +47,7 @@ That script will:
 - auto-pick a likely `groupby`
 - auto-pick a likely initial color column
 - choose a few extra color columns when possible
-- write `<input_stem>_karospace_buildr.html` beside the `.rds`
+- write `<input_stem>_karospacer.html` beside the `.rds`
 
 If you only want to inspect what it would choose:
 

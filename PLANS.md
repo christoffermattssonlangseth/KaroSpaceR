@@ -17,7 +17,7 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 - [ ] Add CLI/example-script option `--genes`.
 
 ### Acceptance Criteria
-- `Heart_A90_karospace_buildr.html` can switch between cluster coloring and true gene-expression coloring.
+- `Heart_A90_karospacer.html` can switch between cluster coloring and true gene-expression coloring.
 
 ---
 

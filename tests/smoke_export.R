@@ -40,7 +40,7 @@ toy <- list(
 )
 
 cluster_meta <- data.frame(
-  seurat_clusters = rep(c("0", "1", "2"), length.out = n_cells),
+  seurat_clusters = rep(c("0", "1", "2", NA), length.out = n_cells),
   stringsAsFactors = FALSE,
   row.names = rownames(obs)
 )
@@ -69,6 +69,7 @@ stopifnot(isTRUE(payload$has_umap))
 stopifnot(identical(names(payload$genes_meta), c("Gene01", "Gene02")))
 stopifnot(length(payload$sections[[1]]$genes$Gene01) == 20L)
 stopifnot(identical(payload$gene_encodings$Gene01, "dense"))
+stopifnot("(missing)" %in% unlist(payload$colors_meta$seurat_clusters$categories, use.names = FALSE))
 
 gene_info <- resolve_input_gene_names(toy)
 stopifnot(identical(unlist(gene_info$gene_names[1:3], use.names = FALSE), c("Gene01", "Gene02", "Gene03")))

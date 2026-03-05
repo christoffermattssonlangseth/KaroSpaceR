@@ -27,7 +27,7 @@ karospace_default_viewer_info <- function() {
     '</div>',
     '<div class="info-block">',
     '<div class="info-title">Source</div>',
-    '<div class="info-text">Built from an RDS input via the standalone KaroSpaceBuildR exporter.</div>',
+    '<div class="info-text">Built from an RDS input via the standalone KaroSpaceR exporter.</div>',
     '</div>'
   )
 }

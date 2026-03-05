@@ -1,4 +1,4 @@
-Package: KaroSpaceBuildR
+Package: KaroSpaceR
 Title: Build KaroSpace-Like Viewers from RDS Inputs
 Version: 0.0.1
 Authors@R: person("Chris", "Langseth", role = c("aut", "cre"))
