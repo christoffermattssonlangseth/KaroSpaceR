@@ -42,6 +42,9 @@ if (isTRUE(options$help) || is.null(options$input)) {
       "[--groupby sample_id] [--initial-color cell_type] [--additional-colors course,condition]",
       "[--metadata-input other_object.rds] [--metadata-input-columns col1,col2] [--metadata-prefix ext_]",
       "[--assay SCT] [--genes GENE1,GENE2] [--neighbor-mode spatial] [--neighbor-graph SCT_snn] [--neighbor-k 6] [--inspect] [--inspect-genes]",
+      "[--marker-genes-groupby auto] [--marker-genes-top-n 20]",
+      "[--interaction-markers-groupby cell_type] [--interaction-markers-top-targets 8] [--interaction-markers-top-genes 12]",
+      "[--interaction-markers-min-cells 30] [--interaction-markers-min-neighbors 1]",
       "[--gene-query COL] [--gene-limit 50] [--title MyViewer] [--theme light]",
       sep = "\n"
     ),
@@ -381,6 +384,40 @@ if (length(missing_additional_colors) > 0L) {
 output_path <- options$output %||% default_output_path(input_path)
 title <- options$title %||% tools::file_path_sans_ext(basename(input_path))
 theme <- options$theme %||% "light"
+marker_genes_groupby <- split_csv(options[["marker-genes-groupby"]]) %||% "auto"
+marker_genes_top_n <- suppressWarnings(as.integer(options[["marker-genes-top-n"]] %||% 20L))
+if (is.na(marker_genes_top_n) || marker_genes_top_n < 1L) {
+  marker_genes_top_n <- 20L
+}
+interaction_markers_groupby <- split_csv(options[["interaction-markers-groupby"]])
+interaction_markers_top_targets <- suppressWarnings(as.integer(options[["interaction-markers-top-targets"]] %||% 8L))
+if (is.na(interaction_markers_top_targets) || interaction_markers_top_targets < 1L) {
+  interaction_markers_top_targets <- 8L
+}
+interaction_markers_top_genes <- suppressWarnings(as.integer(options[["interaction-markers-top-genes"]] %||% 12L))
+if (is.na(interaction_markers_top_genes) || interaction_markers_top_genes < 1L) {
+  interaction_markers_top_genes <- 12L
+}
+interaction_markers_min_cells <- suppressWarnings(as.integer(options[["interaction-markers-min-cells"]] %||% 30L))
+if (is.na(interaction_markers_min_cells) || interaction_markers_min_cells < 2L) {
+  interaction_markers_min_cells <- 30L
+}
+interaction_markers_min_neighbors <- suppressWarnings(as.integer(options[["interaction-markers-min-neighbors"]] %||% 1L))
+if (is.na(interaction_markers_min_neighbors) || interaction_markers_min_neighbors < 1L) {
+  interaction_markers_min_neighbors <- 1L
+}
+phase4_color_columns <- unique(c(initial_color, additional_colors %||% character()))
+phase4_color_columns <- intersect(phase4_color_columns, names(obs))
+phase4_color_data <- lapply(phase4_color_columns, function(column_name) build_color_column(obs[[column_name]]))
+names(phase4_color_data) <- phase4_color_columns
+resolved_marker_groupby <- resolve_phase4_groupby_columns(
+  requested_groupby = unique(c(marker_genes_groupby, interaction_markers_groupby)),
+  color_data = phase4_color_data
+)
+resolved_interaction_groupby <- resolve_phase4_groupby_columns(
+  requested_groupby = interaction_markers_groupby,
+  color_data = phase4_color_data
+)
 
 cat("Input: ", input_path, "\n", sep = "")
 if (!is.null(metadata_input_path) && nzchar(metadata_input_path)) {
@@ -397,6 +434,23 @@ cat("Assay: ", assay_name %||% "<none>", "\n", sep = "")
 cat("Neighbor mode: ", neighbor_mode, "\n", sep = "")
 cat("Neighbor graph: ", neighbor_graph %||% "<auto>", "\n", sep = "")
 cat("Neighbor k: ", neighbor_k, "\n", sep = "")
+cat(
+  "Marker colors: ",
+  if (length(resolved_marker_groupby) > 0L) paste(resolved_marker_groupby, collapse = ", ") else "<none>",
+  "\n",
+  sep = ""
+)
+cat("Marker top N: ", marker_genes_top_n, "\n", sep = "")
+cat(
+  "Interaction colors: ",
+  if (length(resolved_interaction_groupby) > 0L) paste(resolved_interaction_groupby, collapse = ", ") else "<none>",
+  "\n",
+  sep = ""
+)
+cat("Interaction top targets: ", interaction_markers_top_targets, "\n", sep = "")
+cat("Interaction top genes: ", interaction_markers_top_genes, "\n", sep = "")
+cat("Interaction min cells: ", interaction_markers_min_cells, "\n", sep = "")
+cat("Interaction min neighbors: ", interaction_markers_min_neighbors, "\n", sep = "")
 cat(
   "Additional colors: ",
   if (length(additional_colors %||% character()) > 0L) paste(additional_colors, collapse = ", ") else "<none>",
@@ -494,6 +548,13 @@ export_karospace_viewer(
   neighbor_k = neighbor_k,
   metadata_columns = split_csv(options[["metadata-columns"]]),
   outline_by = options[["outline-by"]],
+  marker_genes_groupby = marker_genes_groupby,
+  marker_genes_top_n = marker_genes_top_n,
+  interaction_markers_groupby = interaction_markers_groupby,
+  interaction_markers_top_targets = interaction_markers_top_targets,
+  interaction_markers_top_genes = interaction_markers_top_genes,
+  interaction_markers_min_cells = interaction_markers_min_cells,
+  interaction_markers_min_neighbors = interaction_markers_min_neighbors,
   title = title,
   theme = theme,
   min_panel_size = as.numeric(options[["min-panel-size"]] %||% 150),

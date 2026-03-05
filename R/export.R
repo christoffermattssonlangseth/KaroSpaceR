@@ -142,6 +142,13 @@ export_karospace_viewer <- function(
   neighbor_k = 6L,
   metadata_columns = NULL,
   outline_by = NULL,
+  marker_genes_groupby = NULL,
+  marker_genes_top_n = 20L,
+  interaction_markers_groupby = NULL,
+  interaction_markers_top_targets = 8L,
+  interaction_markers_top_genes = 12L,
+  interaction_markers_min_cells = 30L,
+  interaction_markers_min_neighbors = 1L,
   title = "KaroSpace",
   theme = "light",
   min_panel_size = 150,
@@ -163,7 +170,14 @@ export_karospace_viewer <- function(
     neighbor_graph = neighbor_graph,
     neighbor_k = neighbor_k,
     metadata_columns = metadata_columns,
-    outline_by = outline_by
+    outline_by = outline_by,
+    marker_genes_groupby = marker_genes_groupby,
+    marker_genes_top_n = marker_genes_top_n,
+    interaction_markers_groupby = interaction_markers_groupby,
+    interaction_markers_top_targets = interaction_markers_top_targets,
+    interaction_markers_top_genes = interaction_markers_top_genes,
+    interaction_markers_min_cells = interaction_markers_min_cells,
+    interaction_markers_min_neighbors = interaction_markers_min_neighbors
   )
 
   render_viewer_html(

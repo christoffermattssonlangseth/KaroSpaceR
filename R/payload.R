@@ -12,7 +12,14 @@ build_viewer_payload <- function(
   neighbor_graph = NULL,
   neighbor_k = 6L,
   metadata_columns = NULL,
-  outline_by = NULL
+  outline_by = NULL,
+  marker_genes_groupby = NULL,
+  marker_genes_top_n = 20L,
+  interaction_markers_groupby = NULL,
+  interaction_markers_top_targets = 8L,
+  interaction_markers_top_genes = 12L,
+  interaction_markers_min_cells = 30L,
+  interaction_markers_min_neighbors = 1L
 ) {
   source <- normalize_input_source(
     x = prepare_karospace_input(
@@ -33,10 +40,28 @@ build_viewer_payload <- function(
     outline_by = outline_by
   )
 
-  build_payload_from_normalized(source)
+  build_payload_from_normalized(
+    source = source,
+    marker_genes_groupby = marker_genes_groupby,
+    marker_genes_top_n = marker_genes_top_n,
+    interaction_markers_groupby = interaction_markers_groupby,
+    interaction_markers_top_targets = interaction_markers_top_targets,
+    interaction_markers_top_genes = interaction_markers_top_genes,
+    interaction_markers_min_cells = interaction_markers_min_cells,
+    interaction_markers_min_neighbors = interaction_markers_min_neighbors
+  )
 }
 
-build_payload_from_normalized <- function(source) {
+build_payload_from_normalized <- function(
+  source,
+  marker_genes_groupby = NULL,
+  marker_genes_top_n = 20L,
+  interaction_markers_groupby = NULL,
+  interaction_markers_top_targets = 8L,
+  interaction_markers_top_genes = 12L,
+  interaction_markers_min_cells = 30L,
+  interaction_markers_min_neighbors = 1L
+) {
   obs <- source$obs
   coords <- source$coords
   umap <- source$umap
@@ -131,6 +156,30 @@ build_payload_from_normalized <- function(source) {
     section_edges = section_edges
   )
   has_neighbors <- has_neighbor_edges(section_edges)
+  marker_columns <- resolve_phase4_groupby_columns(
+    requested_groupby = unique(c(marker_genes_groupby, interaction_markers_groupby)),
+    color_data = color_data
+  )
+  marker_genes <- build_marker_genes(
+    expression = expression,
+    gene_names = source$gene_names,
+    color_data = color_data,
+    requested_groupby = marker_columns,
+    top_n = marker_genes_top_n
+  )
+  interaction_markers <- build_interaction_markers(
+    expression = expression,
+    gene_names = source$gene_names,
+    color_data = color_data,
+    requested_groupby = interaction_markers_groupby,
+    neighbor_stats = neighbor_stats,
+    section_index_map = section_index_map,
+    section_edges = section_edges,
+    top_targets = interaction_markers_top_targets,
+    top_genes = interaction_markers_top_genes,
+    min_cells = interaction_markers_min_cells,
+    min_neighbors = interaction_markers_min_neighbors
+  )
 
   payload <- list(
     schema_version = "1.0.0",
@@ -145,13 +194,13 @@ build_payload_from_normalized <- function(source) {
     sections = sections,
     available_colors = as_json_array(color_columns),
     available_genes = as_json_array(names(gene_data$meta)),
-    marker_genes = empty_named_list(),
+    marker_genes = marker_genes,
     has_umap = has_umap,
     umap_bounds = build_umap_bounds(umap),
     has_neighbors = has_neighbors,
     neighbors_key = if (has_neighbors) source$neighbors_key %||% "neighbors" else NULL,
     neighbor_stats = neighbor_stats,
-    interaction_markers = empty_named_list()
+    interaction_markers = interaction_markers
   )
 
   if (!is.null(source$outline_by)) {
@@ -227,6 +276,377 @@ build_neighbor_stats <- function(color_data, section_index_map, section_edges) {
   }
 
   stats
+}
+
+resolve_phase4_groupby_columns <- function(requested_groupby, color_data, max_categories = 50L) {
+  if (length(color_data) == 0L) {
+    return(character())
+  }
+
+  categorical_columns <- names(color_data)[!vapply(color_data, function(info) {
+    isTRUE(info$meta$is_continuous)
+  }, logical(1))]
+
+  requested <- trimws(as.character(requested_groupby %||% character()))
+  requested <- requested[nzchar(requested)]
+  if (length(requested) == 0L) {
+    return(character())
+  }
+
+  requested_lower <- tolower(requested)
+  if ("none" %in% requested_lower) {
+    return(character())
+  }
+
+  columns <- character()
+  if ("auto" %in% requested_lower) {
+    auto_columns <- categorical_columns[vapply(categorical_columns, function(column_name) {
+      categories <- unlist(color_data[[column_name]]$meta$categories %||% list(), use.names = FALSE)
+      length(categories) >= 2L && length(categories) <= max_categories
+    }, logical(1))]
+    columns <- c(columns, auto_columns)
+  }
+
+  explicit_columns <- requested[!(requested_lower %in% c("auto", "none"))]
+  columns <- c(columns, explicit_columns)
+  columns <- unique(intersect(columns, categorical_columns))
+  columns
+}
+
+build_marker_genes <- function(
+  expression,
+  gene_names,
+  color_data,
+  requested_groupby = NULL,
+  top_n = 20L,
+  min_cells = 3L
+) {
+  markers <- empty_named_list()
+  groupby_columns <- resolve_phase4_groupby_columns(
+    requested_groupby = requested_groupby,
+    color_data = color_data
+  )
+  if (length(groupby_columns) == 0L || is.null(expression) || length(gene_names %||% character()) == 0L) {
+    return(markers)
+  }
+
+  top_n <- max(1L, as.integer(top_n %||% 20L))
+  min_cells <- max(2L, as.integer(min_cells %||% 3L))
+
+  for (color_name in groupby_columns) {
+    info <- color_data[[color_name]]
+    categories <- as.character(unlist(info$meta$categories %||% list(), use.names = FALSE))
+    codes <- as.integer(info$values) + 1L
+    valid_codes <- is.finite(codes) & codes > 0L
+    group_markers <- empty_named_list()
+
+    for (category_idx in seq_along(categories)) {
+      category_name <- categories[[category_idx]]
+      if (identical(category_name, "(missing)")) {
+        next
+      }
+
+      pos_idx <- which(codes == category_idx)
+      neg_idx <- which(valid_codes & codes != category_idx)
+      if (length(pos_idx) < min_cells || length(neg_idx) < min_cells) {
+        next
+      }
+
+      ranked <- rank_marker_genes_between_groups(
+        expression = expression,
+        gene_names = gene_names,
+        pos_idx = pos_idx,
+        neg_idx = neg_idx,
+        top_n = top_n
+      )
+      if (length(ranked$genes) == 0L) {
+        next
+      }
+
+      group_markers[[category_name]] <- as_json_array(ranked$genes)
+    }
+
+    if (length(group_markers) > 0L) {
+      markers[[color_name]] <- group_markers
+    }
+  }
+
+  markers
+}
+
+build_interaction_markers <- function(
+  expression,
+  gene_names,
+  color_data,
+  requested_groupby = NULL,
+  neighbor_stats,
+  section_index_map,
+  section_edges,
+  top_targets = 8L,
+  top_genes = 12L,
+  min_cells = 30L,
+  min_neighbors = 1L
+) {
+  interactions <- empty_named_list()
+  if (is.null(expression) || !has_neighbor_edges(section_edges) || length(gene_names %||% character()) == 0L) {
+    return(interactions)
+  }
+
+  groupby_columns <- resolve_phase4_groupby_columns(
+    requested_groupby = requested_groupby,
+    color_data = color_data
+  )
+  if (length(groupby_columns) == 0L) {
+    return(interactions)
+  }
+
+  top_targets <- max(1L, as.integer(top_targets %||% 8L))
+  top_genes <- max(1L, as.integer(top_genes %||% 12L))
+  min_cells <- max(2L, as.integer(min_cells %||% 30L))
+  min_neighbors <- max(1L, as.integer(min_neighbors %||% 1L))
+
+  for (color_name in groupby_columns) {
+    stats_entry <- neighbor_stats[[color_name]] %||% NULL
+    if (is.null(stats_entry)) {
+      next
+    }
+
+    categories <- as.character(unlist(stats_entry$categories %||% list(), use.names = FALSE))
+    if (length(categories) == 0L) {
+      next
+    }
+
+    counts_matrix <- neighbor_counts_to_matrix(
+      counts = stats_entry$counts,
+      n_categories = length(categories)
+    )
+    zscore_matrix <- neighbor_counts_to_matrix(
+      counts = stats_entry$zscore,
+      n_categories = length(categories),
+      default = NA_real_
+    )
+
+    info <- color_data[[color_name]]
+    codes <- as.integer(info$values) + 1L
+    neighbor_category_counts <- build_neighbor_category_counts(
+      labels = codes,
+      n_categories = length(categories),
+      section_index_map = section_index_map,
+      section_edges = section_edges
+    )
+
+    color_interactions <- empty_named_list()
+    for (source_idx in seq_along(categories)) {
+      source_name <- categories[[source_idx]]
+      if (identical(source_name, "(missing)")) {
+        next
+      }
+
+      source_mask <- codes == source_idx
+      if (!any(source_mask, na.rm = TRUE)) {
+        next
+      }
+
+      row_counts <- counts_matrix[source_idx, ]
+      candidate_targets <- which(row_counts > 0)
+      candidate_targets <- setdiff(candidate_targets, source_idx)
+      candidate_targets <- candidate_targets[categories[candidate_targets] != "(missing)"]
+      if (length(candidate_targets) == 0L) {
+        next
+      }
+
+      ranked_targets <- candidate_targets[order(
+        ifelse(is.finite(zscore_matrix[source_idx, candidate_targets]), -zscore_matrix[source_idx, candidate_targets], Inf),
+        -row_counts[candidate_targets],
+        categories[candidate_targets]
+      )]
+      ranked_targets <- utils::head(ranked_targets, top_targets)
+
+      source_result <- empty_named_list()
+      for (target_idx in ranked_targets) {
+        target_name <- categories[[target_idx]]
+        target_neighbor_counts <- neighbor_category_counts[, target_idx]
+        pos_idx <- which(source_mask & target_neighbor_counts >= min_neighbors)
+        neg_idx <- which(source_mask & target_neighbor_counts == 0L)
+        n_pos <- length(pos_idx)
+        n_neg <- length(neg_idx)
+
+        entry <- list(
+          available = n_pos >= min_cells && n_neg >= min_cells,
+          genes = list(),
+          logfoldchanges = list(),
+          pvals_adj = list(),
+          n_contact = n_pos,
+          n_non_contact = n_neg,
+          pct_contact = 100 * n_pos / max(1L, n_pos + n_neg),
+          mean_target_neighbors_contact = if (n_pos > 0L) mean(target_neighbor_counts[pos_idx]) else 0,
+          mean_target_neighbors_non_contact = if (n_neg > 0L) mean(target_neighbor_counts[neg_idx]) else 0,
+          target_edge_count = as.numeric(row_counts[[target_idx]] %||% 0),
+          target_zscore = if (is.finite(zscore_matrix[source_idx, target_idx])) {
+            as.numeric(zscore_matrix[source_idx, target_idx])
+          } else {
+            NULL
+          }
+        )
+
+        if (!isTRUE(entry$available)) {
+          entry$reason <- "insufficient_cells"
+          entry$min_cells_required <- min_cells
+          source_result[[target_name]] <- entry
+          next
+        }
+
+        ranked <- rank_marker_genes_between_groups(
+          expression = expression,
+          gene_names = gene_names,
+          pos_idx = pos_idx,
+          neg_idx = neg_idx,
+          top_n = top_genes
+        )
+        entry$genes <- as_json_array(ranked$genes)
+        entry$logfoldchanges <- as_json_array(as.numeric(ranked$effect))
+        source_result[[target_name]] <- entry
+      }
+
+      if (length(source_result) > 0L) {
+        color_interactions[[source_name]] <- source_result
+      }
+    }
+
+    if (length(color_interactions) > 0L) {
+      interactions[[color_name]] <- color_interactions
+    }
+  }
+
+  interactions
+}
+
+rank_marker_genes_between_groups <- function(expression, gene_names, pos_idx, neg_idx, top_n = 20L) {
+  top_n <- max(1L, as.integer(top_n %||% 20L))
+  if (length(pos_idx) == 0L || length(neg_idx) == 0L) {
+    return(list(genes = character(), effect = numeric()))
+  }
+
+  mean_pos <- matrix_rowmeans(expression[, pos_idx, drop = FALSE])
+  mean_neg <- matrix_rowmeans(expression[, neg_idx, drop = FALSE])
+  pct_pos <- matrix_detection_rate(expression[, pos_idx, drop = FALSE])
+  pct_neg <- matrix_detection_rate(expression[, neg_idx, drop = FALSE])
+
+  effect <- mean_pos - mean_neg
+  pct_diff <- pct_pos - pct_neg
+  valid <- is.finite(effect) &
+    is.finite(pct_diff) &
+    is.finite(mean_pos) &
+    is.character(gene_names) &
+    !is.na(gene_names) &
+    nzchar(gene_names)
+
+  preferred <- valid & (effect > 0 | (effect == 0 & pct_diff > 0))
+  candidate_idx <- if (any(preferred)) {
+    which(preferred)
+  } else {
+    which(valid & mean_pos > 0)
+  }
+  if (length(candidate_idx) == 0L) {
+    return(list(genes = character(), effect = numeric()))
+  }
+
+  ord <- order(
+    -effect[candidate_idx],
+    -pct_diff[candidate_idx],
+    -mean_pos[candidate_idx],
+    gene_names[candidate_idx]
+  )
+  top_idx <- candidate_idx[utils::head(ord, top_n)]
+  list(
+    genes = as.character(gene_names[top_idx]),
+    effect = as.numeric(effect[top_idx])
+  )
+}
+
+matrix_rowmeans <- function(x) {
+  if (is.null(x) || ncol(x) == 0L) {
+    return(rep.int(0, nrow(x %||% matrix(numeric(), nrow = 0L))))
+  }
+  if (methods::is(x, "Matrix")) {
+    if (!requireNamespace("Matrix", quietly = TRUE)) {
+      stop("Sparse marker computation requires the Matrix package.")
+    }
+    return(as.numeric(Matrix::rowMeans(x)))
+  }
+  as.numeric(rowMeans(x))
+}
+
+matrix_detection_rate <- function(x) {
+  if (is.null(x) || ncol(x) == 0L) {
+    return(rep.int(0, nrow(x %||% matrix(numeric(), nrow = 0L))))
+  }
+  if (methods::is(x, "Matrix")) {
+    if (!requireNamespace("Matrix", quietly = TRUE)) {
+      stop("Sparse marker computation requires the Matrix package.")
+    }
+    return(as.numeric(Matrix::rowMeans(x > 0)))
+  }
+  as.numeric(rowMeans(x > 0))
+}
+
+neighbor_counts_to_matrix <- function(counts, n_categories, default = 0) {
+  if (is.null(counts) || length(counts) == 0L || n_categories < 1L) {
+    return(matrix(default, nrow = n_categories, ncol = n_categories))
+  }
+
+  out <- matrix(default, nrow = n_categories, ncol = n_categories)
+  limit <- min(length(counts), n_categories)
+  for (row_idx in seq_len(limit)) {
+    row_values <- as.numeric(unlist(counts[[row_idx]] %||% list(), use.names = FALSE))
+    if (length(row_values) == 0L) {
+      next
+    }
+    row_limit <- min(length(row_values), n_categories)
+    out[row_idx, seq_len(row_limit)] <- row_values[seq_len(row_limit)]
+  }
+  out
+}
+
+build_neighbor_category_counts <- function(labels, n_categories, section_index_map, section_edges) {
+  n_cells <- length(labels)
+  counts <- matrix(0L, nrow = n_cells, ncol = n_categories)
+  if (n_cells == 0L || n_categories == 0L || !has_neighbor_edges(section_edges)) {
+    return(counts)
+  }
+
+  labels <- as.integer(labels)
+  for (section_id in names(section_index_map)) {
+    idx <- section_index_map[[section_id]]
+    edge_values <- as.integer(section_edges[[section_id]] %||% integer())
+    if (length(idx) == 0L || length(edge_values) == 0L) {
+      next
+    }
+
+    edge_matrix <- matrix(edge_values, ncol = 2L, byrow = TRUE) + 1L
+    src_local <- edge_matrix[, 1]
+    dst_local <- edge_matrix[, 2]
+    src_global <- idx[src_local]
+    dst_global <- idx[dst_local]
+    src_labels <- labels[src_global]
+    dst_labels <- labels[dst_global]
+
+    valid_dst <- is.finite(dst_labels) & dst_labels >= 1L & dst_labels <= n_categories
+    if (any(valid_dst)) {
+      for (pair_idx in which(valid_dst)) {
+        counts[src_global[[pair_idx]], dst_labels[[pair_idx]]] <- counts[src_global[[pair_idx]], dst_labels[[pair_idx]]] + 1L
+      }
+    }
+
+    valid_src <- is.finite(src_labels) & src_labels >= 1L & src_labels <= n_categories
+    if (any(valid_src)) {
+      for (pair_idx in which(valid_src)) {
+        counts[dst_global[[pair_idx]], src_labels[[pair_idx]]] <- counts[dst_global[[pair_idx]], src_labels[[pair_idx]]] + 1L
+      }
+    }
+  }
+
+  counts
 }
 
 build_color_column <- function(column) {

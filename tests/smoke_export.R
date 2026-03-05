@@ -9,7 +9,11 @@ n_genes <- 12
 
 obs <- data.frame(
   sample_id = rep(c("section_a", "section_b", "section_c"), each = 20),
-  cell_type = sample(c("A", "B", "C"), size = n_cells, replace = TRUE),
+  cell_type = c(
+    rep("A", 10), rep("B", 10),
+    rep("A", 10), rep("C", 10),
+    rep("B", 10), rep("C", 10)
+  ),
   course = rep(c("naive", "peak", "recovery"), each = 20),
   stringsAsFactors = FALSE
 )
@@ -31,12 +35,41 @@ expr <- matrix(
   ncol = n_cells,
   dimnames = list(sprintf("Gene%02d", seq_len(n_genes)), NULL)
 )
+expr["Gene01", obs$cell_type == "A"] <- expr["Gene01", obs$cell_type == "A"] + 8
+expr["Gene02", obs$cell_type == "B"] <- expr["Gene02", obs$cell_type == "B"] + 8
+expr["Gene03", obs$cell_type == "C"] <- expr["Gene03", obs$cell_type == "C"] + 8
+expr["Gene04", obs$sample_id == "section_a" & obs$cell_type == "A"] <-
+  expr["Gene04", obs$sample_id == "section_a" & obs$cell_type == "A"] + 10
+expr["Gene05", obs$sample_id == "section_b" & obs$cell_type == "A"] <-
+  expr["Gene05", obs$sample_id == "section_b" & obs$cell_type == "A"] + 10
+
+section_edges <- list(
+  section_a = as.integer(c(
+    0, 10,
+    1, 11,
+    2, 12,
+    3, 13,
+    4, 14
+  )),
+  section_b = as.integer(c(
+    0, 10,
+    1, 11,
+    2, 12
+  )),
+  section_c = as.integer(c(
+    0, 10,
+    1, 11,
+    2, 12
+  ))
+)
 
 toy <- list(
   obs = obs,
   coordinates = coords,
   umap = umap,
-  expression = expr
+  expression = expr,
+  neighbor_edges_by_section = section_edges,
+  neighbors_key = "toy_neighbors"
 )
 
 cluster_meta <- data.frame(
@@ -67,8 +100,14 @@ payload <- build_viewer_payload(
   initial_color = "cell_type",
   additional_colors = c("course", "seurat_clusters"),
   genes = c("Gene01", "Gene02"),
-  neighbor_mode = "spatial",
-  neighbor_k = 1L,
+  neighbor_mode = "existing",
+  marker_genes_groupby = "auto",
+  marker_genes_top_n = 4L,
+  interaction_markers_groupby = "cell_type",
+  interaction_markers_top_targets = 2L,
+  interaction_markers_top_genes = 3L,
+  interaction_markers_min_cells = 3L,
+  interaction_markers_min_neighbors = 1L,
   metadata_columns = c("course")
 )
 
@@ -78,7 +117,7 @@ stopifnot(identical(unlist(payload$available_colors, use.names = FALSE), c("cell
 stopifnot(identical(unlist(payload$available_genes, use.names = FALSE), c("Gene01", "Gene02")))
 stopifnot(isTRUE(payload$has_umap))
 stopifnot(isTRUE(payload$has_neighbors))
-stopifnot(identical(payload$neighbors_key, "spatial_knn_k1"))
+stopifnot(identical(payload$neighbors_key, "toy_neighbors"))
 stopifnot(identical(names(payload$genes_meta), c("Gene01", "Gene02")))
 stopifnot(length(payload$sections[[1]]$genes$Gene01) == 20L)
 stopifnot(identical(payload$gene_encodings$Gene01, "dense"))
@@ -88,6 +127,15 @@ stopifnot(is.null(payload$sections[[1]]$edges))
 stopifnot("cell_type" %in% names(payload$neighbor_stats))
 stopifnot(length(payload$neighbor_stats$cell_type$categories) == 3L)
 stopifnot(length(payload$neighbor_stats$cell_type$counts) == 3L)
+stopifnot("cell_type" %in% names(payload$marker_genes))
+stopifnot("Gene01" %in% unlist(payload$marker_genes$cell_type$A, use.names = FALSE))
+stopifnot("Gene02" %in% unlist(payload$marker_genes$cell_type$B, use.names = FALSE))
+stopifnot("Gene03" %in% unlist(payload$marker_genes$cell_type$C, use.names = FALSE))
+stopifnot("cell_type" %in% names(payload$interaction_markers))
+stopifnot(isTRUE(payload$interaction_markers$cell_type$A$B$available))
+stopifnot("Gene04" %in% unlist(payload$interaction_markers$cell_type$A$B$genes, use.names = FALSE))
+stopifnot(payload$interaction_markers$cell_type$A$B$n_contact >= 5L)
+stopifnot(payload$interaction_markers$cell_type$A$B$n_non_contact >= 5L)
 
 gene_info <- resolve_input_gene_names(toy)
 stopifnot(identical(unlist(gene_info$gene_names[1:3], use.names = FALSE), c("Gene01", "Gene02", "Gene03")))
@@ -151,5 +199,7 @@ html <- paste(readLines(output_path, warn = FALSE, encoding = "UTF-8"), collapse
 stopifnot(grepl("Smoke Viewer", html, fixed = TRUE))
 stopifnot(grepl("section_a", html, fixed = TRUE))
 stopifnot(grepl("Gene01", html, fixed = TRUE))
+stopifnot(grepl("marker_genes", html, fixed = TRUE))
+stopifnot(grepl("interaction_markers", html, fixed = TRUE))
 
 cat("smoke_export: ok\n")

@@ -7,7 +7,10 @@ Current scope:
 - Pure-R payload normalization and HTML export
 - Vendored viewer shell snapshot stored in this repo
 - Render parity first: same viewer shell and core interactions
+- Marker-gene export for categorical colors
+- Optional contact-conditioned interaction markers on top of spatial neighbors
 - Supported inputs today:
+  - `Seurat`
   - Plain R lists with `obs`, `coordinates`, and optional `expression` / `umap`
   - `SingleCellExperiment`
   - `SpatialExperiment`
@@ -30,7 +33,8 @@ Rscript scripts/karospace_build_r.R \
   --initial-color cell_type \
   --additional-colors course \
   --assay SCT \
-  --genes CXCL8,COL1A1
+  --genes CXCL8,COL1A1 \
+  --marker-genes-groupby auto
 ```
 
 ## Fastest Real-Dataset Test
@@ -87,6 +91,26 @@ Rscript scripts/example_export.R \
   --genes CXCL8,COL1A1 \
   --output viewer.html
 ```
+
+To precompute contact-conditioned interaction markers for a categorical color:
+
+```bash
+Rscript scripts/example_export.R \
+  --input path/to/object.rds \
+  --groupby sample_id \
+  --initial-color cell_type \
+  --additional-colors course \
+  --neighbor-mode spatial \
+  --marker-genes-groupby auto \
+  --interaction-markers-groupby cell_type \
+  --interaction-markers-top-targets 8 \
+  --interaction-markers-top-genes 12 \
+  --interaction-markers-min-cells 30 \
+  --interaction-markers-min-neighbors 1 \
+  --output viewer.html
+```
+
+Marker genes default to the exported categorical colors in `example_export.R`. Interaction markers stay opt-in because they are more expensive and depend on the neighbor graph.
 
 ## Plain-list input contract
 

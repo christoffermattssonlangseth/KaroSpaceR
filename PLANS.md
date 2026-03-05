@@ -65,14 +65,18 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 ## Phase 4: Marker Genes and Interaction Features
 
 ### Tasks
-- [ ] Implement marker-gene computation for categorical groupings.
-- [ ] Add marker export to viewer payload.
-- [ ] Add optional interaction/contact-style marker computation.
-- [ ] Ensure interaction markers depend on the graph layer.
-- [ ] Keep marker computations optional due to computational cost.
+- [x] Implement marker-gene computation for categorical groupings.
+- [x] Add marker export to viewer payload.
+- [x] Add optional interaction/contact-style marker computation.
+- [x] Ensure interaction markers depend on the graph layer.
+- [x] Keep marker computations optional due to computational cost.
 
 ### Acceptance Criteria
 - Viewer marker panels show real results instead of empty states.
+
+### Notes
+- Marker genes can be computed automatically for exported categorical colors.
+- Interaction markers remain opt-in and require a neighbor graph.
 
 ---
 
@@ -96,5 +100,5 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 - Phase 1: ✅ Complete  
 - Phase 2: ✅ Complete  
 - Phase 3: ✅ Complete  
-- Phase 4: ⬜ Not started  
+- Phase 4: ✅ Complete  
 - Phase 5: ⬜ Not started
