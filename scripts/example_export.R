@@ -41,7 +41,7 @@ if (isTRUE(options$help) || is.null(options$input)) {
       "Rscript scripts/example_export.R --input path/to/object.rds [--output viewer.html]",
       "[--groupby sample_id] [--initial-color cell_type] [--additional-colors course,condition]",
       "[--metadata-input other_object.rds] [--metadata-input-columns col1,col2] [--metadata-prefix ext_]",
-      "[--assay SCT] [--genes GENE1,GENE2] [--top-genes 200] [--neighbor-mode spatial] [--neighbor-graph SCT_snn] [--neighbor-k 6] [--inspect] [--inspect-genes]",
+      "[--assay SCT] [--genes GENE1,GENE2] [--top-genes 200] [--lightweight] [--neighbor-mode spatial] [--neighbor-graph SCT_snn] [--neighbor-k 6] [--inspect] [--inspect-genes]",
       "[--marker-genes-groupby auto] [--marker-genes-top-n 20]",
       "[--interaction-markers-groupby cell_type] [--interaction-markers-top-targets 8] [--interaction-markers-top-genes 12]",
       "[--interaction-markers-min-cells 30] [--interaction-markers-min-neighbors 1]",
@@ -58,6 +58,23 @@ split_csv <- function(value) {
     return(NULL)
   }
   trimws(strsplit(value, ",", fixed = TRUE)[[1]])
+}
+
+parse_bool_option <- function(value, default = FALSE) {
+  if (is.null(value)) {
+    return(default)
+  }
+  if (isTRUE(value)) {
+    return(TRUE)
+  }
+  normalized <- tolower(trimws(as.character(value)[[1]]))
+  if (normalized %in% c("true", "t", "1", "yes", "y", "on")) {
+    return(TRUE)
+  }
+  if (normalized %in% c("false", "f", "0", "no", "n", "off")) {
+    return(FALSE)
+  }
+  stop("Could not parse boolean option value: ", value)
 }
 
 extract_obs <- function(x) {
@@ -392,12 +409,17 @@ if (length(missing_additional_colors) > 0L) {
 output_path <- options$output %||% default_output_path(input_path)
 title <- options$title %||% tools::file_path_sans_ext(basename(input_path))
 theme <- options$theme %||% "light"
-marker_genes_groupby <- split_csv(options[["marker-genes-groupby"]]) %||% "auto"
+lightweight <- parse_bool_option(options[["lightweight"]], default = FALSE)
+marker_genes_groupby <- split_csv(options[["marker-genes-groupby"]]) %||%
+  if (isTRUE(lightweight)) "none" else "auto"
 marker_genes_top_n <- suppressWarnings(as.integer(options[["marker-genes-top-n"]] %||% 20L))
 if (is.na(marker_genes_top_n) || marker_genes_top_n < 1L) {
   marker_genes_top_n <- 20L
 }
 interaction_markers_groupby <- split_csv(options[["interaction-markers-groupby"]])
+if (isTRUE(lightweight) && is.null(options[["interaction-markers-groupby"]])) {
+  interaction_markers_groupby <- "none"
+}
 interaction_markers_top_targets <- suppressWarnings(as.integer(options[["interaction-markers-top-targets"]] %||% 8L))
 if (is.na(interaction_markers_top_targets) || interaction_markers_top_targets < 1L) {
   interaction_markers_top_targets <- 8L
@@ -440,6 +462,7 @@ cat("Detected groupby: ", groupby, "\n", sep = "")
 cat("Detected initial color: ", initial_color, "\n", sep = "")
 cat("Assay: ", assay_name %||% "<none>", "\n", sep = "")
 cat("Top genes: ", top_genes_n %||% "<default>", "\n", sep = "")
+cat("Lightweight: ", if (isTRUE(lightweight)) "true" else "false", "\n", sep = "")
 cat("Neighbor mode: ", neighbor_mode, "\n", sep = "")
 cat("Neighbor graph: ", neighbor_graph %||% "<auto>", "\n", sep = "")
 cat("Neighbor k: ", neighbor_k, "\n", sep = "")
@@ -558,6 +581,7 @@ export_karospace_viewer(
   neighbor_k = neighbor_k,
   metadata_columns = split_csv(options[["metadata-columns"]]),
   outline_by = options[["outline-by"]],
+  lightweight = lightweight,
   marker_genes_groupby = marker_genes_groupby,
   marker_genes_top_n = marker_genes_top_n,
   interaction_markers_groupby = interaction_markers_groupby,

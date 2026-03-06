@@ -83,15 +83,20 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 ## Phase 5: Performance and Payload Size
 
 ### Tasks
-- [ ] Implement sparse gene encoding for expression matrices.
-- [ ] Add optional array packing for large payloads.
-- [ ] Add base64 encoding for large section payloads when needed.
-- [ ] Implement a `lightweight export` mode.
-- [ ] Reduce HTML payload size where possible.
+- [x] Implement sparse gene encoding for expression matrices.
+- [x] Add optional array packing for large payloads.
+- [x] Add base64 encoding for large section payloads when needed.
+- [x] Implement a `lightweight export` mode.
+- [x] Reduce HTML payload size where possible.
 
 ### Acceptance Criteria
 - Large datasets export successfully.
 - HTML files remain usable and do not become excessively large.
+
+### Notes
+- Large section arrays are packed automatically when they exceed a minimum size.
+- Sparse gene encoding is selected automatically for mostly-zero gene vectors.
+- `lightweight` mode disables heavy analyses unless explicitly requested.
 
 ---
 
@@ -101,4 +106,4 @@ Goal: Achieve feature parity between the R export pipeline and the Python pipeli
 - Phase 2: ✅ Complete  
 - Phase 3: ✅ Complete  
 - Phase 4: ✅ Complete  
-- Phase 5: ⬜ Not started
+- Phase 5: ✅ Complete

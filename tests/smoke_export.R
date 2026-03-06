@@ -42,6 +42,8 @@ expr["Gene04", obs$sample_id == "section_a" & obs$cell_type == "A"] <-
   expr["Gene04", obs$sample_id == "section_a" & obs$cell_type == "A"] + 10
 expr["Gene05", obs$sample_id == "section_b" & obs$cell_type == "A"] <-
   expr["Gene05", obs$sample_id == "section_b" & obs$cell_type == "A"] + 10
+expr["Gene06", ] <- 0
+expr["Gene06", c(1, 25)] <- c(4, 6)
 
 section_edges <- list(
   section_a = as.integer(c(
@@ -136,6 +138,29 @@ stopifnot(isTRUE(payload$interaction_markers$cell_type$A$B$available))
 stopifnot("Gene04" %in% unlist(payload$interaction_markers$cell_type$A$B$genes, use.names = FALSE))
 stopifnot(payload$interaction_markers$cell_type$A$B$n_contact >= 5L)
 stopifnot(payload$interaction_markers$cell_type$A$B$n_non_contact >= 5L)
+
+packed_payload <- build_viewer_payload(
+  input = merged_toy,
+  groupby = "sample_id",
+  initial_color = "cell_type",
+  additional_colors = c("course"),
+  genes = c("Gene06"),
+  neighbor_mode = "existing",
+  pack_arrays = TRUE,
+  pack_arrays_min_len = 1L,
+  gene_sparse_zero_threshold = 0.9,
+  gene_sparse_pack = TRUE,
+  gene_sparse_pack_min_nnz = 1L,
+  lightweight = TRUE
+)
+stopifnot(is.null(packed_payload$sections[[1]]$x))
+stopifnot(is.character(packed_payload$sections[[1]]$xb64) && nzchar(packed_payload$sections[[1]]$xb64))
+stopifnot(is.character(packed_payload$sections[[1]]$colors_b64$cell_type) && nzchar(packed_payload$sections[[1]]$colors_b64$cell_type))
+stopifnot(identical(packed_payload$gene_encodings$Gene06, "sparse"))
+stopifnot(is.character(packed_payload$sections[[1]]$genes_sparse$Gene06$ib64) && nzchar(packed_payload$sections[[1]]$genes_sparse$Gene06$ib64))
+stopifnot(is.character(packed_payload$sections[[1]]$genes_sparse$Gene06$vb64) && nzchar(packed_payload$sections[[1]]$genes_sparse$Gene06$vb64))
+stopifnot(length(packed_payload$marker_genes) == 0L)
+stopifnot(length(packed_payload$interaction_markers) == 0L)
 
 gene_info <- resolve_input_gene_names(toy)
 stopifnot(identical(unlist(gene_info$gene_names[1:3], use.names = FALSE), c("Gene01", "Gene02", "Gene03")))

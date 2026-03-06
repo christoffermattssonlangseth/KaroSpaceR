@@ -14,6 +14,12 @@ build_viewer_payload <- function(
   neighbor_k = 6L,
   metadata_columns = NULL,
   outline_by = NULL,
+  lightweight = FALSE,
+  pack_arrays = TRUE,
+  pack_arrays_min_len = 1000L,
+  gene_sparse_zero_threshold = 0.8,
+  gene_sparse_pack = TRUE,
+  gene_sparse_pack_min_nnz = 32L,
   marker_genes_groupby = NULL,
   marker_genes_top_n = 20L,
   interaction_markers_groupby = NULL,
@@ -44,6 +50,12 @@ build_viewer_payload <- function(
 
   build_payload_from_normalized(
     source = source,
+    lightweight = lightweight,
+    pack_arrays = pack_arrays,
+    pack_arrays_min_len = pack_arrays_min_len,
+    gene_sparse_zero_threshold = gene_sparse_zero_threshold,
+    gene_sparse_pack = gene_sparse_pack,
+    gene_sparse_pack_min_nnz = gene_sparse_pack_min_nnz,
     marker_genes_groupby = marker_genes_groupby,
     marker_genes_top_n = marker_genes_top_n,
     interaction_markers_groupby = interaction_markers_groupby,
@@ -56,6 +68,12 @@ build_viewer_payload <- function(
 
 build_payload_from_normalized <- function(
   source,
+  lightweight = FALSE,
+  pack_arrays = TRUE,
+  pack_arrays_min_len = 1000L,
+  gene_sparse_zero_threshold = 0.8,
+  gene_sparse_pack = TRUE,
+  gene_sparse_pack_min_nnz = 32L,
   marker_genes_groupby = NULL,
   marker_genes_top_n = 20L,
   interaction_markers_groupby = NULL,
@@ -78,7 +96,8 @@ build_payload_from_normalized <- function(
   gene_data <- build_gene_data(
     expression = expression,
     gene_names = source$gene_names,
-    selected_genes = source$selected_genes
+    selected_genes = source$selected_genes,
+    sparse_zero_threshold = gene_sparse_zero_threshold
   )
 
   metadata_filters <- build_metadata_filters(
@@ -99,14 +118,37 @@ build_payload_from_normalized <- function(
     section_obs <- obs[idx, , drop = FALSE]
     section_coords <- coords[idx, , drop = FALSE]
     section_edge_pairs <- as.integer(section_edges[[section_id]] %||% integer())
+    should_pack_arrays <- isTRUE(pack_arrays) && length(idx) >= as.integer(pack_arrays_min_len %||% 1000L)
 
-    section_colors <- lapply(color_data, function(info) {
-      as_json_array(as.numeric(info$values[idx]))
-    })
+    section_colors <- empty_named_list()
+    section_colors_b64 <- empty_named_list()
+    for (color_name in names(color_data)) {
+      section_values <- as.numeric(color_data[[color_name]]$values[idx])
+      if (should_pack_arrays) {
+        section_colors_b64[[color_name]] <- pack_float32_base64(section_values)
+      } else {
+        section_colors[[color_name]] <- as_json_array(section_values)
+      }
+    }
 
-    section_genes <- lapply(gene_data$values, function(values) {
-      as_json_array(as.numeric(values[idx]))
-    })
+    section_genes <- empty_named_list()
+    section_genes_sparse <- empty_named_list()
+    for (gene_name in names(gene_data$values)) {
+      section_values <- as.numeric(gene_data$values[[gene_name]][idx])
+      mode <- gene_data$encodings[[gene_name]] %||% "dense"
+      if (identical(mode, "sparse")) {
+        sparse_entry <- encode_sparse_gene_values(
+          values = section_values,
+          pack_sparse = gene_sparse_pack,
+          pack_min_nnz = gene_sparse_pack_min_nnz
+        )
+        if (!is.null(sparse_entry)) {
+          section_genes_sparse[[gene_name]] <- sparse_entry
+        }
+      } else {
+        section_genes[[gene_name]] <- as_json_array(section_values)
+      }
+    }
 
     packed_edges <- pack_uint32_base64(section_edge_pairs)
 
@@ -114,16 +156,16 @@ build_payload_from_normalized <- function(
       id = section_id,
       metadata = build_section_metadata(section_obs, source$metadata_columns),
       n_cells = length(idx),
-      x = as_json_array(as.numeric(section_coords[, 1])),
-      y = as_json_array(as.numeric(section_coords[, 2])),
-      xb64 = NULL,
-      yb64 = NULL,
-      obs_idx = as_json_array(as.integer(all_indices[idx])),
-      obs_idxb64 = NULL,
+      x = if (should_pack_arrays) NULL else as_json_array(as.numeric(section_coords[, 1])),
+      y = if (should_pack_arrays) NULL else as_json_array(as.numeric(section_coords[, 2])),
+      xb64 = if (should_pack_arrays) pack_float32_base64(section_coords[, 1]) else NULL,
+      yb64 = if (should_pack_arrays) pack_float32_base64(section_coords[, 2]) else NULL,
+      obs_idx = if (should_pack_arrays) NULL else as_json_array(as.integer(all_indices[idx])),
+      obs_idxb64 = if (should_pack_arrays) pack_uint32_base64(as.integer(all_indices[idx])) else NULL,
       colors = section_colors,
-      colors_b64 = empty_named_list(),
+      colors_b64 = section_colors_b64,
       genes = section_genes,
-      genes_sparse = empty_named_list(),
+      genes_sparse = section_genes_sparse,
       bounds = list(
         xmin = min(section_coords[, 1]),
         xmax = max(section_coords[, 1]),
@@ -139,8 +181,10 @@ build_payload_from_normalized <- function(
     )
 
     if (has_umap) {
-      section_entry$umap_x <- as_json_array(as.numeric(umap[idx, 1]))
-      section_entry$umap_y <- as_json_array(as.numeric(umap[idx, 2]))
+      section_entry$umap_x <- if (should_pack_arrays) NULL else as_json_array(as.numeric(umap[idx, 1]))
+      section_entry$umap_y <- if (should_pack_arrays) NULL else as_json_array(as.numeric(umap[idx, 2]))
+      section_entry$umap_xb64 <- if (should_pack_arrays) pack_float32_base64(umap[idx, 1]) else NULL
+      section_entry$umap_yb64 <- if (should_pack_arrays) pack_float32_base64(umap[idx, 2]) else NULL
     }
 
     sections[[i]] <- section_entry
@@ -148,16 +192,21 @@ build_payload_from_normalized <- function(
 
   colors_meta <- lapply(color_data, function(info) info$meta)
   genes_meta <- lapply(gene_data$meta, identity)
-  gene_encodings <- stats::setNames(
-    as.list(rep("dense", length(gene_data$meta))),
-    names(gene_data$meta)
-  )
+  gene_encodings <- gene_data$encodings
   neighbor_stats <- build_neighbor_stats(
     color_data = color_data,
     section_index_map = section_index_map,
     section_edges = section_edges
   )
   has_neighbors <- has_neighbor_edges(section_edges)
+  if (isTRUE(lightweight)) {
+    if (length(marker_genes_groupby %||% character()) == 0L) {
+      marker_genes_groupby <- "none"
+    }
+    if (length(interaction_markers_groupby %||% character()) == 0L) {
+      interaction_markers_groupby <- "none"
+    }
+  }
   marker_columns <- resolve_phase4_groupby_columns(
     requested_groupby = unique(c(marker_genes_groupby, interaction_markers_groupby)),
     color_data = color_data
@@ -668,9 +717,13 @@ build_color_column <- function(column) {
   list(values = values, meta = meta)
 }
 
-build_gene_data <- function(expression, gene_names, selected_genes) {
+build_gene_data <- function(expression, gene_names, selected_genes, sparse_zero_threshold = 0.8) {
   if (is.null(expression) || length(selected_genes) == 0) {
-    return(list(values = empty_named_list(), meta = empty_named_list()))
+    return(list(
+      values = empty_named_list(),
+      meta = empty_named_list(),
+      encodings = empty_named_list()
+    ))
   }
 
   gene_names <- as.character(gene_names)
@@ -678,23 +731,27 @@ build_gene_data <- function(expression, gene_names, selected_genes) {
 
   values <- vector("list", length(selected_genes))
   meta <- vector("list", length(selected_genes))
+  encodings <- vector("list", length(selected_genes))
   names(values) <- selected_genes
   names(meta) <- selected_genes
+  names(encodings) <- selected_genes
 
   for (i in seq_along(selected_genes)) {
     gene <- selected_genes[[i]]
     idx <- gene_index[[i]]
     vector <- extract_gene_vector(expression, idx)
     finite <- vector[is.finite(vector)]
+    zero_fraction <- if (length(finite) == 0L) 1 else mean(finite == 0)
 
     values[[gene]] <- vector
     meta[[gene]] <- list(
       vmin = if (length(finite) > 0) min(finite) else 0,
       vmax = if (length(finite) > 0) max(finite) else 1
     )
+    encodings[[gene]] <- if (isTRUE(zero_fraction >= sparse_zero_threshold)) "sparse" else "dense"
   }
 
-  list(values = values, meta = meta)
+  list(values = values, meta = meta, encodings = encodings)
 }
 
 extract_gene_vector <- function(expression, idx) {
@@ -702,6 +759,40 @@ extract_gene_vector <- function(expression, idx) {
     return(as.numeric(expression[idx, , drop = TRUE]))
   }
   as.numeric(expression[idx, , drop = TRUE])
+}
+
+encode_sparse_gene_values <- function(values, pack_sparse = TRUE, pack_min_nnz = 32L) {
+  finite <- is.finite(values)
+  nonzero <- finite & (values != 0)
+  if (!any(nonzero)) {
+    nan_idx <- which(is.na(values)) - 1L
+    out <- list(i = list(), v = list())
+    if (length(nan_idx) > 0L) {
+      out$nan <- as_json_array(as.integer(nan_idx))
+    }
+    return(out)
+  }
+
+  nz_idx <- which(nonzero) - 1L
+  nz_vals <- as.numeric(values[nonzero])
+  should_pack_sparse <- isTRUE(pack_sparse) && length(nz_idx) >= as.integer(pack_min_nnz %||% 32L)
+  out <- if (should_pack_sparse) {
+    list(
+      ib64 = pack_uint32_base64(as.integer(nz_idx)),
+      vb64 = pack_float32_base64(nz_vals)
+    )
+  } else {
+    list(
+      i = as_json_array(as.integer(nz_idx)),
+      v = as_json_array(nz_vals)
+    )
+  }
+
+  nan_idx <- which(is.na(values)) - 1L
+  if (length(nan_idx) > 0L) {
+    out$nan <- as_json_array(as.integer(nan_idx))
+  }
+  out
 }
 
 build_metadata_filters <- function(obs, metadata_columns) {

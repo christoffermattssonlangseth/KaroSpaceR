@@ -42,6 +42,20 @@ split_csv <- function(value) {
   trimws(strsplit(value, ",", fixed = TRUE)[[1]])
 }
 
+parse_bool_option <- function(value, default = FALSE) {
+  if (is.null(value)) {
+    return(default)
+  }
+  normalized <- tolower(trimws(as.character(value)[[1]]))
+  if (normalized %in% c("true", "t", "1", "yes", "y", "on")) {
+    return(TRUE)
+  }
+  if (normalized %in% c("false", "f", "0", "no", "n", "off")) {
+    return(FALSE)
+  }
+  stop("Could not parse boolean option value: ", value)
+}
+
 format_percentage <- function(x) {
   sprintf("%.1f%%", 100 * x)
 }
@@ -133,6 +147,7 @@ if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && !is.null(top_g
   warning("--top-genes is ignored because --genes was provided explicitly.", call. = FALSE)
   top_genes_n <- NULL
 }
+lightweight <- parse_bool_option(options[["lightweight"]], default = FALSE)
 report_metadata_merge(prepared_input)
 warn_low_coverage_selected_colors(
   obj = prepared_input,
@@ -156,9 +171,12 @@ export_karospace_viewer(
   neighbor_k = as.integer(options[["neighbor-k"]] %||% 6L),
   metadata_columns = split_csv(options[["metadata-columns"]]),
   outline_by = options[["outline-by"]],
-  marker_genes_groupby = split_csv(options[["marker-genes-groupby"]]) %||% "auto",
+  lightweight = lightweight,
+  marker_genes_groupby = split_csv(options[["marker-genes-groupby"]]) %||%
+    if (isTRUE(lightweight)) "none" else "auto",
   marker_genes_top_n = as.integer(options[["marker-genes-top-n"]] %||% 20L),
-  interaction_markers_groupby = split_csv(options[["interaction-markers-groupby"]]),
+  interaction_markers_groupby = split_csv(options[["interaction-markers-groupby"]]) %||%
+    if (isTRUE(lightweight)) "none" else NULL,
   interaction_markers_top_targets = as.integer(options[["interaction-markers-top-targets"]] %||% 8L),
   interaction_markers_top_genes = as.integer(options[["interaction-markers-top-genes"]] %||% 12L),
   interaction_markers_min_cells = as.integer(options[["interaction-markers-min-cells"]] %||% 30L),

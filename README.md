@@ -9,6 +9,8 @@ Current scope:
 - Render parity first: same viewer shell and core interactions
 - Marker-gene export for categorical colors
 - Optional contact-conditioned interaction markers on top of spatial neighbors
+- Automatic sparse gene encoding and packed section arrays for large exports
+- Optional `lightweight` export mode for smaller HTML output
 - Supported inputs today:
   - `Seurat`
   - Plain R lists with `obs`, `coordinates`, and optional `expression` / `umap`
@@ -102,6 +104,22 @@ Rscript scripts/example_export.R \
 ```
 
 `--top-genes 200` selects the top 200 genes by mean expression across all exported cells/spots in the selected assay.
+
+If you want a smaller standalone HTML and do not need precomputed marker or interaction panels, use lightweight mode:
+
+```bash
+Rscript scripts/example_export.R \
+  --input path/to/object.rds \
+  --assay SCT \
+  --top-genes 200 \
+  --lightweight
+```
+
+Phase 5 behavior:
+
+- large section arrays are packed automatically into base64 float32/uint32 payloads
+- mostly-zero gene vectors are exported as sparse index/value arrays
+- `--lightweight` disables heavy precomputed analyses unless you explicitly turn them back on
 
 To precompute contact-conditioned interaction markers for a categorical color:
 
