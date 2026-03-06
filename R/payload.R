@@ -26,7 +26,10 @@ build_viewer_payload <- function(
   interaction_markers_top_targets = 8L,
   interaction_markers_top_genes = 12L,
   interaction_markers_min_cells = 30L,
-  interaction_markers_min_neighbors = 1L
+  interaction_markers_min_neighbors = 1L,
+  marker_test = "mean_diff",
+  neighbor_stats_permutations = 0L,
+  neighbor_stats_seed = 42L
 ) {
   source <- normalize_input_source(
     x = prepare_karospace_input(
@@ -62,7 +65,10 @@ build_viewer_payload <- function(
     interaction_markers_top_targets = interaction_markers_top_targets,
     interaction_markers_top_genes = interaction_markers_top_genes,
     interaction_markers_min_cells = interaction_markers_min_cells,
-    interaction_markers_min_neighbors = interaction_markers_min_neighbors
+    interaction_markers_min_neighbors = interaction_markers_min_neighbors,
+    marker_test = marker_test,
+    neighbor_stats_permutations = neighbor_stats_permutations,
+    neighbor_stats_seed = neighbor_stats_seed
   )
 }
 
@@ -80,7 +86,10 @@ build_payload_from_normalized <- function(
   interaction_markers_top_targets = 8L,
   interaction_markers_top_genes = 12L,
   interaction_markers_min_cells = 30L,
-  interaction_markers_min_neighbors = 1L
+  interaction_markers_min_neighbors = 1L,
+  marker_test = "mean_diff",
+  neighbor_stats_permutations = 0L,
+  neighbor_stats_seed = 42L
 ) {
   obs <- source$obs
   coords <- source$coords
@@ -196,7 +205,9 @@ build_payload_from_normalized <- function(
   neighbor_stats <- build_neighbor_stats(
     color_data = color_data,
     section_index_map = section_index_map,
-    section_edges = section_edges
+    section_edges = section_edges,
+    n_perms = neighbor_stats_permutations,
+    seed = neighbor_stats_seed
   )
   has_neighbors <- has_neighbor_edges(section_edges)
   if (isTRUE(lightweight)) {
@@ -216,7 +227,8 @@ build_payload_from_normalized <- function(
     gene_names = source$gene_names,
     color_data = color_data,
     requested_groupby = marker_columns,
-    top_n = marker_genes_top_n
+    top_n = marker_genes_top_n,
+    marker_test = marker_test
   )
   interaction_markers <- build_interaction_markers(
     expression = expression,
@@ -229,7 +241,8 @@ build_payload_from_normalized <- function(
     top_targets = interaction_markers_top_targets,
     top_genes = interaction_markers_top_genes,
     min_cells = interaction_markers_min_cells,
-    min_neighbors = interaction_markers_min_neighbors
+    min_neighbors = interaction_markers_min_neighbors,
+    marker_test = marker_test
   )
 
   payload <- list(
@@ -261,11 +274,13 @@ build_payload_from_normalized <- function(
   payload
 }
 
-build_neighbor_stats <- function(color_data, section_index_map, section_edges) {
+build_neighbor_stats <- function(color_data, section_index_map, section_edges, n_perms = 0L, seed = 42L) {
   stats <- empty_named_list()
   if (!has_neighbor_edges(section_edges) || length(color_data) == 0L) {
     return(stats)
   }
+
+  n_perms <- max(0L, as.integer(n_perms %||% 0L))
 
   for (color_name in names(color_data)) {
     info <- color_data[[color_name]]
@@ -283,6 +298,7 @@ build_neighbor_stats <- function(color_data, section_index_map, section_edges) {
     n_cells <- tabulate(encoded_all, nbins = n_categories)
     counts <- matrix(0, nrow = n_categories, ncol = n_categories)
     degree_sum <- numeric(n_categories)
+    n_cats_sq <- n_categories^2L
 
     for (section_id in names(section_index_map)) {
       idx <- section_index_map[[section_id]]
@@ -298,21 +314,37 @@ build_neighbor_stats <- function(color_data, section_index_map, section_edges) {
       source_cat <- section_values[edge_matrix[, 1] + 1L]
       target_cat <- section_values[edge_matrix[, 2] + 1L]
 
-      valid <- is.finite(source_cat) & is.finite(target_cat)
+      valid <- is.finite(source_cat) & is.finite(target_cat) &
+               source_cat >= 1L & source_cat <= n_categories &
+               target_cat >= 1L & target_cat <= n_categories
       if (!any(valid)) {
         next
       }
-      source_cat <- as.integer(source_cat[valid])
-      target_cat <- as.integer(target_cat[valid])
+      sc <- as.integer(source_cat[valid])
+      tc <- as.integer(target_cat[valid])
 
-      for (pair_idx in seq_along(source_cat)) {
-        i <- source_cat[[pair_idx]]
-        j <- target_cat[[pair_idx]]
-        counts[i, j] <- counts[i, j] + 1
-        counts[j, i] <- counts[j, i] + 1
-        degree_sum[i] <- degree_sum[i] + 1
-        degree_sum[j] <- degree_sum[j] + 1
-      }
+      combined_fwd <- (sc - 1L) * n_categories + tc
+      combined_rev <- (tc - 1L) * n_categories + sc
+      counts <- counts +
+        matrix(tabulate(combined_fwd, nbins = n_cats_sq), n_categories, n_categories) +
+        matrix(tabulate(combined_rev, nbins = n_cats_sq), n_categories, n_categories)
+      degree_sum <- degree_sum +
+        tabulate(sc, nbins = n_categories) +
+        tabulate(tc, nbins = n_categories)
+    }
+
+    z <- if (n_perms > 0L) {
+      compute_neighbor_zscores(
+        encoded_all = encoded_all,
+        n_categories = n_categories,
+        section_index_map = section_index_map,
+        section_edges = section_edges,
+        observed_counts = counts,
+        n_perms = n_perms,
+        seed = seed
+      )
+    } else {
+      NULL
     }
 
     mean_degree <- ifelse(n_cells > 0, degree_sum / n_cells, 0)
@@ -321,12 +353,87 @@ build_neighbor_stats <- function(color_data, section_index_map, section_edges) {
       counts = lapply(seq_len(n_categories), function(i) as_json_array(as.numeric(counts[i, ]))),
       n_cells = as_json_array(as.integer(n_cells)),
       mean_degree = as_json_array(as.numeric(mean_degree)),
-      zscore = NULL,
-      perm_n = 0
+      zscore = if (!is.null(z)) {
+        lapply(seq_len(n_categories), function(i) as_json_array(as.numeric(z[i, ])))
+      } else {
+        NULL
+      },
+      perm_n = as.integer(n_perms)
     )
   }
 
   stats
+}
+
+compute_neighbor_zscores <- function(
+  encoded_all, n_categories, section_index_map, section_edges,
+  observed_counts, n_perms = 200L, seed = 42L
+) {
+  # Collect per-section edge pairs and section membership for labels
+  section_idx_list <- list()
+  all_src <- integer(0)
+  all_dst <- integer(0)
+  for (section_id in names(section_index_map)) {
+    idx <- section_index_map[[section_id]]
+    packed <- as.integer(section_edges[[section_id]] %||% integer())
+    if (!length(packed) || !length(idx)) next
+    em <- matrix(packed, ncol = 2L, byrow = TRUE) + 1L
+    all_src <- c(all_src, idx[em[, 1]])
+    all_dst <- c(all_dst, idx[em[, 2]])
+    section_idx_list[[section_id]] <- idx
+  }
+  if (!length(all_src)) return(NULL)
+
+  n_cats_sq <- n_categories^2L
+
+  # Preserve caller's RNG state
+  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  } else {
+    NULL
+  }
+  on.exit({
+    if (is.null(old_seed)) {
+      if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+        rm(".Random.seed", envir = .GlobalEnv)
+      }
+    } else {
+      assign(".Random.seed", old_seed, envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+  set.seed(seed)
+
+  perm_mean <- matrix(0, n_categories, n_categories)
+  perm_M2   <- matrix(0, n_categories, n_categories)
+
+  for (k in seq_len(n_perms)) {
+    # Section-preserving shuffle: permute labels within each section independently.
+    # This holds section composition fixed — the correct null for a block-diagonal graph.
+    pl <- encoded_all
+    for (idx in section_idx_list) {
+      pl[idx] <- sample(encoded_all[idx])
+    }
+    sc <- pl[all_src]
+    dc <- pl[all_dst]
+    valid <- is.finite(sc) & is.finite(dc) &
+             sc >= 1L & sc <= n_categories & dc >= 1L & dc <= n_categories
+    sc <- sc[valid]
+    dc <- dc[valid]
+    mat <- matrix(
+      tabulate((sc - 1L) * n_categories + dc, nbins = n_cats_sq) +
+      tabulate((dc - 1L) * n_categories + sc, nbins = n_cats_sq),
+      n_categories, n_categories
+    )
+    delta <- mat - perm_mean
+    perm_mean <- perm_mean + delta / k
+    perm_M2   <- perm_M2 + delta * (mat - perm_mean)
+  }
+
+  sd_perm <- sqrt(pmax(0, perm_M2 / max(1L, n_perms - 1L)))
+  z <- matrix(NA_real_, n_categories, n_categories)
+  nz <- sd_perm > 0
+  z[nz] <- (observed_counts[nz] - perm_mean[nz]) / sd_perm[nz]
+  z
 }
 
 resolve_phase4_groupby_columns <- function(requested_groupby, color_data, max_categories = 50L) {
@@ -370,7 +477,8 @@ build_marker_genes <- function(
   color_data,
   requested_groupby = NULL,
   top_n = 20L,
-  min_cells = 3L
+  min_cells = 3L,
+  marker_test = "mean_diff"
 ) {
   markers <- empty_named_list()
   groupby_columns <- resolve_phase4_groupby_columns(
@@ -408,7 +516,8 @@ build_marker_genes <- function(
         gene_names = gene_names,
         pos_idx = pos_idx,
         neg_idx = neg_idx,
-        top_n = top_n
+        top_n = top_n,
+        marker_test = marker_test
       )
       if (length(ranked$genes) == 0L) {
         next
@@ -436,7 +545,8 @@ build_interaction_markers <- function(
   top_targets = 8L,
   top_genes = 12L,
   min_cells = 30L,
-  min_neighbors = 1L
+  min_neighbors = 1L,
+  marker_test = "mean_diff"
 ) {
   interactions <- empty_named_list()
   if (is.null(expression) || !has_neighbor_edges(section_edges) || length(gene_names %||% character()) == 0L) {
@@ -552,10 +662,12 @@ build_interaction_markers <- function(
           gene_names = gene_names,
           pos_idx = pos_idx,
           neg_idx = neg_idx,
-          top_n = top_genes
+          top_n = top_genes,
+          marker_test = marker_test
         )
         entry$genes <- as_json_array(ranked$genes)
         entry$logfoldchanges <- as_json_array(as.numeric(ranked$effect))
+        entry$pvals_adj <- if (!is.null(ranked$pval_adj)) as_json_array(as.numeric(ranked$pval_adj)) else list()
         source_result[[target_name]] <- entry
       }
 
@@ -572,7 +684,17 @@ build_interaction_markers <- function(
   interactions
 }
 
-rank_marker_genes_between_groups <- function(expression, gene_names, pos_idx, neg_idx, top_n = 20L) {
+rank_marker_genes_between_groups <- function(expression, gene_names, pos_idx, neg_idx, top_n = 20L, marker_test = "mean_diff") {
+  if (identical(tolower(marker_test %||% "mean_diff"), "wilcoxon")) {
+    return(rank_marker_genes_wilcoxon(
+      expression = expression,
+      gene_names = gene_names,
+      pos_idx = pos_idx,
+      neg_idx = neg_idx,
+      top_n = top_n
+    ))
+  }
+
   top_n <- max(1L, as.integer(top_n %||% 20L))
   if (length(pos_idx) == 0L || length(neg_idx) == 0L) {
     return(list(genes = character(), effect = numeric()))
@@ -612,6 +734,54 @@ rank_marker_genes_between_groups <- function(expression, gene_names, pos_idx, ne
   list(
     genes = as.character(gene_names[top_idx]),
     effect = as.numeric(effect[top_idx])
+  )
+}
+
+rank_marker_genes_wilcoxon <- function(
+  expression, gene_names, pos_idx, neg_idx, top_n = 20L, prefilter_n = NULL
+) {
+  prefilter_n <- max(top_n, as.integer(prefilter_n %||% (top_n * 5L)))
+  if (!length(pos_idx) || !length(neg_idx)) {
+    return(list(genes = character(), effect = numeric(), pval_adj = numeric()))
+  }
+
+  mean_pos <- matrix_rowmeans(expression[, pos_idx, drop = FALSE])
+  mean_neg <- matrix_rowmeans(expression[, neg_idx, drop = FALSE])
+  pct_pos  <- matrix_detection_rate(expression[, pos_idx, drop = FALSE])
+  pct_neg  <- matrix_detection_rate(expression[, neg_idx, drop = FALSE])
+  effect   <- mean_pos - mean_neg
+  pct_diff <- pct_pos - pct_neg
+
+  valid <- is.finite(effect) & is.character(gene_names) & !is.na(gene_names) & nzchar(gene_names)
+  preferred <- valid & (effect > 0 | (effect == 0 & pct_diff > 0))
+  cands <- if (any(preferred)) which(preferred) else which(valid & mean_pos > 0)
+  if (!length(cands)) {
+    return(list(genes = character(), effect = numeric(), pval_adj = numeric()))
+  }
+
+  cands <- cands[utils::head(order(-effect[cands], -pct_diff[cands]), prefilter_n)]
+
+  pos_m <- expression[cands, pos_idx, drop = FALSE]
+  neg_m <- expression[cands, neg_idx, drop = FALSE]
+  pvals <- vapply(seq_along(cands), function(i) {
+    x <- as.numeric(pos_m[i, ])
+    y <- as.numeric(neg_m[i, ])
+    if (stats::var(c(x, y)) == 0) return(1)
+    tryCatch(
+      stats::wilcox.test(x, y, alternative = "greater", exact = FALSE)$p.value,
+      error = function(e) 1
+    )
+  }, numeric(1))
+
+  padj <- stats::p.adjust(pvals, method = "BH")
+  ord  <- order(padj, -effect[cands])
+  top  <- cands[utils::head(ord, top_n)]
+  padj_top <- padj[utils::head(ord, top_n)]
+
+  list(
+    genes    = as.character(gene_names[top]),
+    effect   = as.numeric(effect[top]),
+    pval_adj = as.numeric(padj_top)
   )
 }
 

@@ -156,6 +156,9 @@ export_karospace_viewer <- function(
   interaction_markers_top_genes = 12L,
   interaction_markers_min_cells = 30L,
   interaction_markers_min_neighbors = 1L,
+  marker_test = "mean_diff",
+  neighbor_stats_permutations = 0L,
+  neighbor_stats_seed = 42L,
   title = "KaroSpace",
   theme = "light",
   min_panel_size = 150,
@@ -191,7 +194,10 @@ export_karospace_viewer <- function(
     interaction_markers_top_targets = interaction_markers_top_targets,
     interaction_markers_top_genes = interaction_markers_top_genes,
     interaction_markers_min_cells = interaction_markers_min_cells,
-    interaction_markers_min_neighbors = interaction_markers_min_neighbors
+    interaction_markers_min_neighbors = interaction_markers_min_neighbors,
+    marker_test = marker_test,
+    neighbor_stats_permutations = neighbor_stats_permutations,
+    neighbor_stats_seed = neighbor_stats_seed
   )
 
   render_viewer_html(

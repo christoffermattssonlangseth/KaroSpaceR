@@ -220,6 +220,28 @@ if (requireNamespace("Matrix", quietly = TRUE)) {
   stopifnot(identical(graph_edges$section_b, c(0L, 1L)))
 }
 
+wx_payload <- build_viewer_payload(
+  input = merged_toy,
+  groupby = "sample_id",
+  initial_color = "cell_type",
+  genes = c("Gene01", "Gene02"),
+  neighbor_mode = "existing",
+  marker_genes_groupby = "auto",
+  marker_test = "wilcoxon"
+)
+stopifnot("Gene01" %in% unlist(wx_payload$marker_genes$cell_type$A, use.names = FALSE))
+
+zs_payload <- build_viewer_payload(
+  input = merged_toy,
+  groupby = "sample_id",
+  initial_color = "cell_type",
+  neighbor_mode = "existing",
+  neighbor_stats_permutations = 50L,
+  neighbor_stats_seed = 1L
+)
+stopifnot(!is.null(zs_payload$neighbor_stats$cell_type$zscore))
+stopifnot(zs_payload$neighbor_stats$cell_type$perm_n == 50L)
+
 output_path <- tempfile(fileext = ".html")
 render_viewer_html(
   payload = payload,

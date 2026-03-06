@@ -139,11 +139,15 @@ prepared_input <- prepare_karospace_input(
   metadata_input_columns = split_csv(options[["metadata-input-columns"]]),
   metadata_prefix = options[["metadata-prefix"]]
 )
-top_genes_n <- suppressWarnings(as.integer(options[["top-genes"]]))
+top_genes_n <- if (is.null(options[["top-genes"]])) {
+  NULL
+} else {
+  suppressWarnings(as.integer(options[["top-genes"]]))
+}
 if (!is.null(options[["top-genes"]]) && (is.na(top_genes_n) || top_genes_n < 1L)) {
   stop("--top-genes must be a positive integer.")
 }
-if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && !is.null(top_genes_n)) {
+if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && length(top_genes_n) > 0L) {
   warning("--top-genes is ignored because --genes was provided explicitly.", call. = FALSE)
   top_genes_n <- NULL
 }
@@ -181,6 +185,9 @@ export_karospace_viewer(
   interaction_markers_top_genes = as.integer(options[["interaction-markers-top-genes"]] %||% 12L),
   interaction_markers_min_cells = as.integer(options[["interaction-markers-min-cells"]] %||% 30L),
   interaction_markers_min_neighbors = as.integer(options[["interaction-markers-min-neighbors"]] %||% 1L),
+  marker_test = options[["marker-test"]] %||% "mean_diff",
+  neighbor_stats_permutations = as.integer(options[["neighbor-stats-permutations"]] %||% 0L),
+  neighbor_stats_seed = as.integer(options[["neighbor-stats-seed"]] %||% 42L),
   title = options[["title"]] %||% "KaroSpace",
   theme = options[["theme"]] %||% "light",
   min_panel_size = as.numeric(options[["min-panel-size"]] %||% 150),

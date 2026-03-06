@@ -42,9 +42,10 @@ if (isTRUE(options$help) || is.null(options$input)) {
       "[--groupby sample_id] [--initial-color cell_type] [--additional-colors course,condition]",
       "[--metadata-input other_object.rds] [--metadata-input-columns col1,col2] [--metadata-prefix ext_]",
       "[--assay SCT] [--genes GENE1,GENE2] [--top-genes 200] [--lightweight] [--neighbor-mode spatial] [--neighbor-graph SCT_snn] [--neighbor-k 6] [--inspect] [--inspect-genes]",
-      "[--marker-genes-groupby auto] [--marker-genes-top-n 20]",
+      "[--marker-genes-groupby auto] [--marker-genes-top-n 20] [--marker-test mean_diff|wilcoxon]",
       "[--interaction-markers-groupby cell_type] [--interaction-markers-top-targets 8] [--interaction-markers-top-genes 12]",
       "[--interaction-markers-min-cells 30] [--interaction-markers-min-neighbors 1]",
+      "[--neighbor-stats-permutations 0] [--neighbor-stats-seed 42]",
       "[--gene-query COL] [--gene-limit 50] [--title MyViewer] [--theme light]",
       sep = "\n"
     ),
@@ -387,11 +388,15 @@ merge_report <- report_metadata_merge(obj, obs)
 groupby <- options$groupby %||% detect_groupby(obs)
 initial_color <- options[["initial-color"]] %||% detect_initial_color(obs, groupby)
 assay_name <- options[["assay"]] %||% detect_assay(obj)
-top_genes_n <- suppressWarnings(as.integer(options[["top-genes"]]))
+top_genes_n <- if (is.null(options[["top-genes"]])) {
+  NULL
+} else {
+  suppressWarnings(as.integer(options[["top-genes"]]))
+}
 if (!is.null(options[["top-genes"]]) && (is.na(top_genes_n) || top_genes_n < 1L)) {
   stop("--top-genes must be a positive integer.")
 }
-if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && !is.null(top_genes_n)) {
+if (!is.null(options[["genes"]]) && nzchar(options[["genes"]]) && length(top_genes_n) > 0L) {
   warning("--top-genes is ignored because --genes was provided explicitly.", call. = FALSE)
   top_genes_n <- NULL
 }
@@ -435,6 +440,19 @@ if (is.na(interaction_markers_min_cells) || interaction_markers_min_cells < 2L) 
 interaction_markers_min_neighbors <- suppressWarnings(as.integer(options[["interaction-markers-min-neighbors"]] %||% 1L))
 if (is.na(interaction_markers_min_neighbors) || interaction_markers_min_neighbors < 1L) {
   interaction_markers_min_neighbors <- 1L
+}
+marker_test <- tolower(trimws(options[["marker-test"]] %||% "mean_diff"))
+if (!marker_test %in% c("mean_diff", "wilcoxon")) {
+  warning("Unknown --marker-test value '", marker_test, "'. Falling back to 'mean_diff'.", call. = FALSE)
+  marker_test <- "mean_diff"
+}
+neighbor_stats_permutations <- suppressWarnings(as.integer(options[["neighbor-stats-permutations"]] %||% 0L))
+if (is.na(neighbor_stats_permutations) || neighbor_stats_permutations < 0L) {
+  neighbor_stats_permutations <- 0L
+}
+neighbor_stats_seed <- suppressWarnings(as.integer(options[["neighbor-stats-seed"]] %||% 42L))
+if (is.na(neighbor_stats_seed)) {
+  neighbor_stats_seed <- 42L
 }
 phase4_color_columns <- unique(c(initial_color, additional_colors %||% character()))
 phase4_color_columns <- intersect(phase4_color_columns, names(obs))
@@ -483,6 +501,9 @@ cat("Interaction top targets: ", interaction_markers_top_targets, "\n", sep = ""
 cat("Interaction top genes: ", interaction_markers_top_genes, "\n", sep = "")
 cat("Interaction min cells: ", interaction_markers_min_cells, "\n", sep = "")
 cat("Interaction min neighbors: ", interaction_markers_min_neighbors, "\n", sep = "")
+cat("Marker test: ", marker_test, "\n", sep = "")
+cat("Neighbor stats permutations: ", neighbor_stats_permutations, "\n", sep = "")
+cat("Neighbor stats seed: ", neighbor_stats_seed, "\n", sep = "")
 cat(
   "Additional colors: ",
   if (length(additional_colors %||% character()) > 0L) paste(additional_colors, collapse = ", ") else "<none>",
@@ -589,6 +610,9 @@ export_karospace_viewer(
   interaction_markers_top_genes = interaction_markers_top_genes,
   interaction_markers_min_cells = interaction_markers_min_cells,
   interaction_markers_min_neighbors = interaction_markers_min_neighbors,
+  marker_test = marker_test,
+  neighbor_stats_permutations = neighbor_stats_permutations,
+  neighbor_stats_seed = neighbor_stats_seed,
   title = title,
   theme = theme,
   min_panel_size = as.numeric(options[["min-panel-size"]] %||% 150),
